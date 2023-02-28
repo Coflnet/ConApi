@@ -1,0 +1,12 @@
+.gitignore
+README.md
+api.module.ts
+api/api.ts
+api/search.service.ts
+configuration.ts
+encoder.ts
+index.ts
+model/models.ts
+model/searchResult.ts
+param.ts
+variables.ts
