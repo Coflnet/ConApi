@@ -132,5 +132,8 @@
       }
     }
   },
-  "defaultProject": "Connections"
+  "defaultProject": "Connections",
+  "cli": {
+    "analytics": false
+  }
 }
