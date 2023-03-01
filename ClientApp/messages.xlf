@@ -1,21 +1,20 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
-  <file source-language="en-US" datatype="plaintext" original="ng2.template">
-    <body>
-      <trans-unit id="typeToSearchText" datatype="html">
+<xliff version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0" srcLang="en-US">
+  <file id="ngi18n" original="ng.template">
+    <unit id="typeToSearchText">
+      <segment>
         <source>Please enter 2 or more characters</source>
-        <context-group purpose="location">
-          <context context-type="sourcefile">src/app/editor/editor.component.html</context>
-          <context context-type="linenumber">10</context>
-        </context-group>
-      </trans-unit>
-      <trans-unit id="addTagText" datatype="html">
+      </segment>
+    </unit>
+    <unit id="addTagText">
+      <segment>
         <source>Create</source>
-        <context-group purpose="location">
-          <context context-type="sourcefile">src/app/editor/editor.component.html</context>
-          <context context-type="linenumber">13,12</context>
-        </context-group>
-      </trans-unit>
-    </body>
+      </segment>
+    </unit>
+    <unit id="3742657416068781599">
+      <segment>
+        <source>Editor</source>
+      </segment>
+    </unit>
   </file>
 </xliff>
