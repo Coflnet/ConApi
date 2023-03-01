@@ -11,6 +11,11 @@ import { CounterComponent } from './counter/counter.component';
 import { ApiModule } from './api.module';
 import { EditorComponent } from './editor/editor.component';
 import { NgSelectModule } from '@ng-select/ng-select';
+import { BASE_PATH } from './variables';
+
+export function getBaseUrl(): string {
+  return "";
+}
 
 @NgModule({
   declarations: [
@@ -31,7 +36,7 @@ import { NgSelectModule } from '@ng-select/ng-select';
       { path: 'editor', component: EditorComponent}
     ])
   ],
-  providers: [],
+  providers: [{ provide: BASE_PATH, useFactory: getBaseUrl }],
   bootstrap: [AppComponent]
 })
 export class AppModule { }

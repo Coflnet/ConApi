@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Connections.Controllers;
 
 [ApiController]
-[Route("[controller]")]
+[Route("api/[controller]")]
 public class SearchController : ControllerBase
 {
     private readonly ILogger<SearchController> _logger;
@@ -19,11 +19,11 @@ public class SearchController : ControllerBase
     {
         return Enumerable.Range(1, 5).Select(index => new SearchResult
         {
-            Name = "Name",
+            Name = "Name" + index,
             Description = "Description",
             Image = "Image",
             Link = "Link"
-        })
+        }).Where(x => x.Name.Contains(value))
         .ToArray();
     }
 }
