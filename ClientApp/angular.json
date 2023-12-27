@@ -75,11 +75,11 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "browserTarget": "Connections:build:production"
+              "buildTarget": "Connections:build:production"
             },
             "development": {
-              "browserTarget": "Connections:build:development",
-              "proxyConfig": "proxy.conf.js"
+              "proxyConfig": "proxy.conf.js",
+              "buildTarget": "Connections:build:development"
             }
           },
           "defaultConfiguration": "development"
@@ -124,7 +124,8 @@
               "sourceMap": false,
               "namedChunks": false,
               "extractLicenses": true,
-              "vendorChunk": true
+              "vendorChunk": true,
+              "buildOptimizer": true
             },
             "production": {
               "optimization": true,
@@ -132,14 +133,14 @@
               "sourceMap": false,
               "namedChunks": false,
               "extractLicenses": true,
-              "vendorChunk": false
+              "vendorChunk": false,
+              "buildOptimizer": true
             }
           }
         }
       }
     }
   },
-  "defaultProject": "Connections",
   "cli": {
     "analytics": false
   }
