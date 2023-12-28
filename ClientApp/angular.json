@@ -16,6 +16,15 @@
       "root": "",
       "sourceRoot": "src",
       "prefix": "app",
+      "i18n": {
+        "sourceLocale": "en-US",
+        "locales": {
+          "de": {
+            "translation": "src/locales/messages.de.xlf",
+            "baseHref": "/de"
+          }
+        }
+      },
       "architect": {
         "build": {
           "builder": "@angular-devkit/build-angular:browser",
@@ -58,7 +67,8 @@
                   "with": "src/environments/environment.prod.ts"
                 }
               ],
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "localize": true
             },
             "development": {
               "buildOptimizer": false,
@@ -67,6 +77,12 @@
               "extractLicenses": false,
               "sourceMap": true,
               "namedChunks": true
+            },
+            "en": {
+              "localize": ["en"]
+            },
+            "de": {
+              "localize": ["de"]
             }
           },
           "defaultConfiguration": "production"
@@ -80,6 +96,12 @@
             "development": {
               "proxyConfig": "proxy.conf.js",
               "buildTarget": "Connections:build:development"
+            },
+            "en": {
+              "buildTarget": "Connections:build:development,en"
+            },
+            "de": {
+              "buildTarget": "Connections:build:development,de"
             }
           },
           "defaultConfiguration": "development"
