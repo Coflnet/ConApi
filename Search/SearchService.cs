@@ -38,7 +38,7 @@ public class SearchService
             {
                 Name = x.Text,
                 Description = x.KeyWord,
-                Id = x.FullId
+                Id = x.FullId.Replace("01/01/0001 00:00:00", "0001-01-01")
             });
     }
     public async Task AddEntry(Guid userId, string text, string fullId, SearchEntry.ResultType type = SearchEntry.ResultType.Unknown)
