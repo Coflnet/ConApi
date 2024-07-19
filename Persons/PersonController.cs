@@ -46,6 +46,9 @@ public class PersonController : ControllerBase
         data.UserId = this.GetUserId();
         await _personService.AddPersonData(data);
         if (data.Key.ToLower() == "name")
-            await _searchService.AddEntry(data.UserId, data.Value, $"{data.Name};{data.Birthday};{data.BirthPlace}", SearchEntry.ResultType.Person);
+        {
+            var date = data.Birthday.ToString("yyyy-MM-dd");
+            await _searchService.AddEntry(data.UserId, data.Value, $"{data.Name};{date};{data.BirthPlace}", SearchEntry.ResultType.Person);
+        }
     }
 }
