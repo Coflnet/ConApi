@@ -118,7 +118,8 @@ public class MigrationRunner
                 typeof(EventService), 
                 typeof(RelationshipService),
                 typeof(ShareService),
-                typeof(DocumentService)
+                typeof(DocumentService),
+                typeof(SourceCitationService)
             };
             foreach (var kt in known)
             {

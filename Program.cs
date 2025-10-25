@@ -18,8 +18,19 @@ builder.Services.AddSingleton<RelationshipService>();
 builder.Services.AddSingleton<ShareService>();
 builder.Services.AddSingleton<DocumentService>();
 builder.Services.AddSingleton<ExportService>();
+builder.Services.AddSingleton<EnhancedSearchService>();
+builder.Services.AddSingleton<SourceCitationService>();
+builder.Services.AddSingleton<CachingService>();
 // Migration runner depends on the services that expose EnsureSchema
 builder.Services.AddSingleton<MigrationRunner>();
+
+// Add memory cache for caching service
+builder.Services.AddMemoryCache();
+
+// Add health checks
+builder.Services.AddHealthChecks()
+    .AddCheck<CassandraHealthCheck>("cassandra")
+    .AddCheck<StorageHealthCheck>("storage");
 
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -59,6 +70,7 @@ using (var scope = app.Services.CreateScope())
 app.UseRouting();
 app.UseCoflnetCore();
 app.UseCors("AllowAll");
+app.UseRateLimiting();
 // log every request
 app.Use(async (context, next) =>
 {
@@ -69,6 +81,7 @@ app.Use(async (context, next) =>
 });
 app.UseCoflAuthService();
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 var googleConfigpath = app.Configuration["GOOGLE_APPLICATION_CREDENTIALS"];
 if (googleConfigpath == null)
