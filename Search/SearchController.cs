@@ -21,7 +21,7 @@ public class SearchController : ControllerBase
 
     [HttpGet]
     [Authorize]
-    public async Task<IEnumerable<SearchResult>> Serach(string value)
+    public async Task<IEnumerable<SearchResult>> Search(string value)
     {
         return await _searchService.Search(this.GetUserId(),value);
     }

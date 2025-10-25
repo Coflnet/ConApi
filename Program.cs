@@ -1,19 +1,31 @@
 using System.Text.Json.Serialization;
 using Coflnet.Auth;
 using Coflnet.Connections.Services;
+using Coflnet.Connections.Middleware;
 using Coflnet.Core;
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Register services
 builder.Services.AddSingleton<SearchService>();
 builder.Services.AddSingleton<PersonService>();
+builder.Services.AddSingleton<PlaceService>();
+builder.Services.AddSingleton<ThingService>();
+builder.Services.AddSingleton<EventService>();
+builder.Services.AddSingleton<RelationshipService>();
+// Migration runner depends on the services that expose EnsureSchema
+builder.Services.AddSingleton<MigrationRunner>();
+
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 
-builder.Services.AddControllers().AddJsonOptions(o =>
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<GlobalExceptionHandler>();
+}).AddJsonOptions(o =>
 {
     o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
@@ -30,6 +42,16 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Run centralized migrations once on startup to avoid individual services doing this repeatedly
+using (var scope = app.Services.CreateScope())
+{
+    var runner = scope.ServiceProvider.GetService<MigrationRunner>();
+    if (runner != null)
+    {
+        runner.RunMigrations();
+    }
+}
 
 app.UseRouting();
 app.UseCoflnetCore();

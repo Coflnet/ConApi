@@ -19,7 +19,74 @@ public class SearchService
             .ClusteringKey(t => t.FullId)
         .Column(o => o.Type, c => c.WithName("type").WithDbType<int>()));
         searchEntries = new Table<SearchEntry>(session, mapping);
+    }
+
+    /// <summary>
+    /// Ensure search schema exists and is configured. Called by centralized migration runner.
+    /// </summary>
+    public void EnsureSchema()
+    {
         searchEntries.CreateIfNotExists();
+        TryEnsureLcs("search_entry");
+    }
+
+    private void TryEnsureLcs(string tableName)
+    {
+        // Wait briefly for table metadata to appear in system_schema (schema propagation) before attempting ALTER.
+        try
+        {
+            var keyspace = session?.Keyspace;
+            if (string.IsNullOrEmpty(keyspace))
+            {
+                Console.WriteLine($"Session has no keyspace; skipping LCS check for {tableName}");
+                return;
+            }
+
+            if (session == null)
+            {
+                Console.WriteLine($"No session available when checking compaction for {tableName}");
+                return;
+            }
+
+            var select = new global::Cassandra.SimpleStatement(
+                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
+                keyspace, tableName);
+
+            var row = (global::Cassandra.Row?)null;
+            for (int i = 0; i < 6; i++)
+            {
+                var rs = session.Execute(select);
+                row = rs.FirstOrDefault();
+                if (row != null) break;
+                System.Threading.Thread.Sleep(500);
+            }
+
+            if (row == null)
+            {
+                Console.WriteLine($"Table {tableName} not yet visible in system_schema; skipping LCS");
+                return;
+            }
+
+            try
+            {
+                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
+                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
+                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"Table {tableName} already uses compaction {cls}");
+                    return;
+                }
+            }
+            catch { }
+
+            var target = $"{keyspace}.{tableName}";
+            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
+            session.Execute(new global::Cassandra.SimpleStatement(cql));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"EnsureLcs failed for {tableName}: {ex.Message}");
+        }
     }
 
     public async Task<IEnumerable<SearchResult>> Search(Guid userId, string value)
@@ -27,9 +94,15 @@ public class SearchService
         var normalizedSearch = NormalizeText(value);
         var words = normalizedSearch.Split(' ');
         var search = new Fastenshtein.Levenshtein(normalizedSearch);
-        var result = await Task.WhenAll(words.Select(x => searchEntries.Where(x => x.UserId == userId && x.KeyWord.StartsWith(words[0])).Take(1000).ExecuteAsync()));
-        var data = await searchEntries.Where(x => x.UserId == userId && x.KeyWord.StartsWith(words[0])).Take(1000).ExecuteAsync();
+        
+        // Search for entries starting with each word
+        var result = await Task.WhenAll(words.Select(word => 
+            searchEntries.Where(x => x.UserId == userId && x.KeyWord.StartsWith(word))
+                .Take(1000)
+                .ExecuteAsync()));
+        
         return result.SelectMany(x => x)
+            .Distinct()
             .Select(x=>(x,NormalizeText(x.Text)))
             .OrderBy(v=>search.DistanceFrom(v.Item2))
             .Take(10)
@@ -38,7 +111,8 @@ public class SearchService
             {
                 Name = x.Text,
                 Description = x.KeyWord,
-                Id = x.FullId.Replace("01/01/0001 00:00:00", "0001-01-01")
+                Id = x.FullId.Replace("01/01/0001 00:00:00", "0001-01-01"),
+                Type = x.Type.ToString()
             });
     }
     public async Task AddEntry(Guid userId, string text, string fullId, SearchEntry.ResultType type = SearchEntry.ResultType.Unknown)
