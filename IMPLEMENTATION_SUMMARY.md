@@ -132,7 +132,7 @@ Build:     ✅ Success
 | Flexible attributes | ✅ Complete | *Data tables for all entities |
 | Family tree support | ✅ Complete | Relationship path finding |
 | Memory function | ✅ Complete | Event timeline queries |
-| Document links | 🔄 Planned | Phase 4 (S3 integration) |
+| Document links | 🔄 Planned | Phase 4 (S3/r2 integration) |
 | Data sharing | 🔄 Planned | Phase 5 (sharing system) |
 
 **Completion**: 12/14 requirements (86%)  

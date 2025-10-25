@@ -15,6 +15,9 @@ builder.Services.AddSingleton<PlaceService>();
 builder.Services.AddSingleton<ThingService>();
 builder.Services.AddSingleton<EventService>();
 builder.Services.AddSingleton<RelationshipService>();
+builder.Services.AddSingleton<ShareService>();
+builder.Services.AddSingleton<DocumentService>();
+builder.Services.AddSingleton<ExportService>();
 // Migration runner depends on the services that expose EnsureSchema
 builder.Services.AddSingleton<MigrationRunner>();
 

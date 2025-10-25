@@ -110,7 +110,16 @@ public class MigrationRunner
         list.Add(("001_ensure_schemas", () =>
         {
             // Resolve known services from the provider and invoke EnsureSchema if present
-            var known = new[] { typeof(SearchService), typeof(PersonService), typeof(PlaceService), typeof(ThingService), typeof(EventService), typeof(RelationshipService) };
+            var known = new[] { 
+                typeof(SearchService), 
+                typeof(PersonService), 
+                typeof(PlaceService), 
+                typeof(ThingService), 
+                typeof(EventService), 
+                typeof(RelationshipService),
+                typeof(ShareService),
+                typeof(DocumentService)
+            };
             foreach (var kt in known)
             {
                 try
