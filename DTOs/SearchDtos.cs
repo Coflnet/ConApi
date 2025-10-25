@@ -39,4 +39,19 @@ public class AdvancedSearchRequest
     /// Maximum results to fetch before pagination
     /// </summary>
     public int? MaxResults { get; set; }
+
+    /// <summary>
+    /// Include faceted counts in results
+    /// </summary>
+    public bool IncludeFacets { get; set; } = false;
 }
+
+/// <summary>
+/// Faceted search count by type
+/// </summary>
+public class SearchFacet
+{
+    public string Type { get; set; } = string.Empty;
+    public int Count { get; set; }
+}
+

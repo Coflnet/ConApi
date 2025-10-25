@@ -296,4 +296,23 @@ public class EventService
             _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
         }
     }
+
+    /// <summary>
+    /// Get all participants (target entities) for an event
+    /// </summary>
+    public async Task<List<Guid>> GetParticipants(Guid userId, Guid eventId)
+    {
+        var evt = await GetEventById(userId, eventId);
+        if (evt == null)
+            return new List<Guid>();
+
+        // Return the target entity ID (in a more complex system, this might query a separate participants table)
+        var participants = new List<Guid>();
+        if (evt.TargetEntityId != Guid.Empty)
+        {
+            participants.Add(evt.TargetEntityId);
+        }
+
+        return participants;
+    }
 }

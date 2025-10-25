@@ -21,6 +21,8 @@ builder.Services.AddSingleton<ExportService>();
 builder.Services.AddSingleton<EnhancedSearchService>();
 builder.Services.AddSingleton<SourceCitationService>();
 builder.Services.AddSingleton<CachingService>();
+builder.Services.AddSingleton<PersonEnhancedService>();
+builder.Services.AddSingleton<RelationshipSuggestionService>();
 // Migration runner depends on the services that expose EnsureSchema
 builder.Services.AddSingleton<MigrationRunner>();
 

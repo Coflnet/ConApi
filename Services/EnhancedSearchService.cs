@@ -100,13 +100,29 @@ public class EnhancedSearchService
             })
             .ToList();
 
+        // Calculate facets if requested
+        List<SearchFacet>? facets = null;
+        if (request.IncludeFacets)
+        {
+            facets = scored
+                .GroupBy(x => x.Entry.Type)
+                .Select(g => new SearchFacet
+                {
+                    Type = g.Key.ToString(),
+                    Count = g.Count()
+                })
+                .OrderByDescending(f => f.Count)
+                .ToList();
+        }
+
         return new SearchResultPage
         {
             Results = pageResults,
             TotalCount = totalCount,
             Page = request.Page ?? 0,
             PageSize = pageSize,
-            TotalPages = (int)Math.Ceiling((double)totalCount / pageSize)
+            TotalPages = (int)Math.Ceiling((double)totalCount / pageSize),
+            Facets = facets
         };
     }
 

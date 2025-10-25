@@ -1,4 +1,7 @@
 namespace Coflnet.Connections;
+
+using Coflnet.Connections.DTOs;
+
 public class SearchResult
 {
     public string? Name { get; set; }
@@ -19,4 +22,5 @@ public class SearchResultPage
     public int Page { get; set; }
     public int PageSize { get; set; }
     public int TotalPages { get; set; }
+    public List<SearchFacet>? Facets { get; set; }
 }

@@ -15,11 +15,16 @@ public class RelationshipController : ControllerBase
 {
     private readonly ILogger<RelationshipController> _logger;
     private readonly RelationshipService _relationshipService;
+    private readonly RelationshipSuggestionService _suggestionService;
 
-    public RelationshipController(ILogger<RelationshipController> logger, RelationshipService relationshipService)
+    public RelationshipController(
+        ILogger<RelationshipController> logger, 
+        RelationshipService relationshipService,
+        RelationshipSuggestionService suggestionService)
     {
         _logger = logger;
         _relationshipService = relationshipService;
+        _suggestionService = suggestionService;
     }
 
     /// <summary>
@@ -145,6 +150,28 @@ public class RelationshipController : ControllerBase
         var userId = this.GetUserId();
         await _relationshipService.DeleteRelationship(userId, id);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Get relationship suggestions for a person based on shared events and places
+    /// </summary>
+    [HttpGet("suggestions/{personId}")]
+    [Authorize]
+    public async Task<ActionResult<List<RelationshipSuggestion>>> GetSuggestions(Guid personId)
+    {
+        var userId = this.GetUserId();
+        _logger.LogInformation("Getting relationship suggestions for person {PersonId}", personId);
+
+        try
+        {
+            var suggestions = await _suggestionService.GetSuggestions(userId, personId);
+            return Ok(suggestions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting relationship suggestions for {PersonId}", personId);
+            return StatusCode(500, "Failed to generate suggestions");
+        }
     }
 
     /// <summary>

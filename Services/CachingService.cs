@@ -93,4 +93,14 @@ public class CachingService
     /// Generate cache key for search results
     /// </summary>
     public static string SearchKey(Guid userId, string query) => $"search:{userId}:{query.ToLowerInvariant()}";
+
+    /// <summary>
+    /// Generate cache key for full person view
+    /// </summary>
+    public static string PersonFullKey(Guid userId, Guid personId) => $"person_full:{userId}:{personId}";
+
+    /// <summary>
+    /// Generate cache key for person timeline
+    /// </summary>
+    public static string PersonTimelineKey(Guid userId, Guid personId) => $"person_timeline:{userId}:{personId}";
 }

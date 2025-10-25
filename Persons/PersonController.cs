@@ -15,8 +15,16 @@ public class PersonController : ControllerBase
     private readonly RelationshipService _relationshipService;
     private readonly ThingService _thingService;
     private readonly EventService _eventService;
+    private readonly PersonEnhancedService _personEnhancedService;
 
-    public PersonController(ILogger<PersonController> logger, PersonService personService, SearchService searchService, RelationshipService relationshipService, ThingService thingService, EventService eventService)
+    public PersonController(
+        ILogger<PersonController> logger, 
+        PersonService personService, 
+        SearchService searchService, 
+        RelationshipService relationshipService, 
+        ThingService thingService, 
+        EventService eventService,
+        PersonEnhancedService personEnhancedService)
     {
         _logger = logger;
         _personService = personService;
@@ -24,6 +32,7 @@ public class PersonController : ControllerBase
         _relationshipService = relationshipService;
         _thingService = thingService;
         _eventService = eventService;
+        _personEnhancedService = personEnhancedService;
     }
 
     [HttpGet("{id}")]
@@ -122,5 +131,95 @@ public class PersonController : ControllerBase
             var fullId = $"{data.Value};{date};{birthPlace}";
             await _searchService.AddEntry(userId, data.Value, fullId, SearchEntry.ResultType.Person);
         }
+    }
+
+    /// <summary>
+    /// Get complete person data with all relationships, events, and places in one optimized call
+    /// FAST: Optimized for frontend performance with parallel data fetching and caching
+    /// </summary>
+    [HttpGet("{id}/full")]
+    [Authorize]
+    public async Task<ActionResult<PersonFullView>> GetPersonFull(Guid id)
+    {
+        var userId = this.GetUserId();
+        _logger.LogInformation("Getting full person view for {PersonId}", id);
+
+        try
+        {
+            var result = await _personEnhancedService.GetPersonFull(userId, id);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting full person view for {PersonId}", id);
+            return StatusCode(500, "Failed to retrieve person data");
+        }
+    }
+
+    /// <summary>
+    /// Get chronological timeline for a person with all life events
+    /// FAST: Pre-built timeline data optimized for frontend display
+    /// </summary>
+    [HttpGet("{id}/timeline")]
+    [Authorize]
+    public async Task<ActionResult<PersonTimeline>> GetPersonTimeline(Guid id)
+    {
+        var userId = this.GetUserId();
+        _logger.LogInformation("Getting timeline for person {PersonId}", id);
+
+        try
+        {
+            var result = await _personEnhancedService.GetPersonTimeline(userId, id);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting timeline for person {PersonId}", id);
+            return StatusCode(500, "Failed to retrieve timeline");
+        }
+    }
+
+    /// <summary>
+    /// Create multiple people at once
+    /// </summary>
+    [HttpPost("bulk")]
+    [Authorize]
+    public async Task<ActionResult<BulkOperationResult>> CreateBulk([FromBody] BulkPersonRequest request)
+    {
+        var userId = this.GetUserId();
+        _logger.LogInformation("Bulk creating {Count} people for user {UserId}", request.People.Count, userId);
+
+        var result = new BulkOperationResult();
+
+        foreach (var personData in request.People)
+        {
+            try
+            {
+                // Create person with name
+                await _personService.UpsertAttribute(userId, null, personData.Name, "name", personData.Name);
+
+                // Add all attributes
+                foreach (var attr in personData.Attributes)
+                {
+                    await _personService.UpsertAttribute(userId, null, personData.Name, attr.Key, attr.Value);
+                }
+
+                // Add to search
+                var date = personData.Attributes.GetValueOrDefault("birthday", string.Empty);
+                var birthPlace = personData.Attributes.GetValueOrDefault("birthplace", string.Empty);
+                var fullId = $"{personData.Name};{date};{birthPlace}";
+                await _searchService.AddEntry(userId, personData.Name, fullId, SearchEntry.ResultType.Person);
+
+                result.SuccessCount++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create person: {Name}", personData.Name);
+                result.FailureCount++;
+                result.Errors.Add($"Failed to create {personData.Name}: {ex.Message}");
+            }
+        }
+
+        return Ok(result);
     }
 }
