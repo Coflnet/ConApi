@@ -21,33 +21,9 @@ public class SourceCitationService
         _session = session;
         _logger = logger;
 
-        var citationMapping = new MappingConfiguration()
-            .Define(new Map<SourceCitation>()
-                .PartitionKey(c => c.UserId)
-                .ClusteringKey(c => c.EntityId)
-                .ClusteringKey(c => c.FieldName)
-                .Column(c => c.EntityType, col => col.WithName("entity_type").WithDbType<int>())
-                .Column(c => c.SourceType, col => col.WithName("source_type").WithDbType<int>())
-                .Column(c => c.PrivacyLevel, col => col.WithName("privacy_level").WithDbType<int>()));
-
-        var bySourceMapping = new MappingConfiguration()
-            .Define(new Map<CitationBySource>()
-                .PartitionKey(c => c.UserId)
-                .ClusteringKey(c => c.Title)
-                .ClusteringKey(c => c.CitationId)
-                .Column(c => c.EntityType, col => col.WithName("entity_type").WithDbType<int>()));
-
-        var conflictMapping = new MappingConfiguration()
-            .Define(new Map<ConflictingInformation>()
-                .PartitionKey(c => c.UserId)
-                .ClusteringKey(c => c.EntityId)
-                .ClusteringKey(c => c.FieldName)
-                .Column(c => c.Resolution, col => col.WithName("resolution").WithDbType<int>())
-                .Column(c => c.PrivacyLevel, col => col.WithName("privacy_level").WithDbType<int>()));
-
-        _citations = new Table<SourceCitation>(session, citationMapping);
-        _citationsBySource = new Table<CitationBySource>(session, bySourceMapping);
-        _conflicts = new Table<ConflictingInformation>(session, conflictMapping);
+        _citations = new Table<SourceCitation>(session, GlobalMapping.Instance);
+        _citationsBySource = new Table<CitationBySource>(session, GlobalMapping.Instance);
+        _conflicts = new Table<ConflictingInformation>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -205,53 +181,6 @@ public class SourceCitationService
 
     private void TryEnsureLcs(string tableName)
     {
-        try
-        {
-            var keyspace = _session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace) || _session == null)
-            {
-                _logger.LogDebug("Session has no keyspace; skipping LCS check for {Table}", tableName);
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            global::Cassandra.Row? row = null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = _session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                _logger.LogDebug("Table {Table} not yet visible in system_schema; skipping LCS", tableName);
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogDebug("Table {Table} already uses compaction {Class}", tableName, cls);
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            _session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
-        }
+        SchemaHelper.TryEnsureLcs(_session, _logger, tableName);
     }
 }

@@ -67,6 +67,7 @@ public class MigrationRunner
                     throw;
                 }
             }
+            _logger.LogInformation("All migrations applied successfully");
         }
         catch (Exception ex)
         {
@@ -139,6 +140,22 @@ public class MigrationRunner
                 {
                     _logger.LogWarning(ex, "Failed schema step for {Service}", kt.Name);
                 }
+            }
+
+            // After creating tables, wait for metadata to propagate for common application tables
+            try
+            {
+                var tables = new[] {
+                    "person","person_data","place","place_data","thing","thing_data","thing_by_owner",
+                    "event","event_data","relationship","relationship_by_from","relationship_by_to","relationship_type",
+                    "search_entry","share_invitation","share_invitation_by_recipient","data_provenance","data_conflict",
+                    "document","document_link","document_by_entity","storage_quota","source_citation","citation_by_source","conflicting_information"
+                };
+                SchemaHelper.WaitForTables(_session, _logger, tables);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WaitForTables failed");
             }
         }, "Create tables and set LCS where needed"));
 

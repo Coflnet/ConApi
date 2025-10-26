@@ -23,42 +23,10 @@ public class ShareService
         _session = session;
         _logger = logger;
 
-        var invitationMapping = new MappingConfiguration()
-            .Define(new Map<ShareInvitation>()
-                .PartitionKey(t => t.UserId, t => t.FromUserId)
-                .ClusteringKey(t => t.ToUserId)
-                .ClusteringKey(t => t.Id)
-                .Column(t => t.Status, c => c.WithName("status").WithDbType<int>())
-                .Column(t => t.Permission, c => c.WithName("permission").WithDbType<int>())
-                .Column(t => t.EntityType, c => c.WithName("entity_type").WithDbType<int>())
-                .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>()));
-
-        var byRecipientMapping = new MappingConfiguration()
-            .Define(new Map<ShareInvitationByRecipient>()
-                .PartitionKey(t => t.ToUserId)
-                .ClusteringKey(t => t.Status)
-                .ClusteringKey(t => t.InvitationId)
-                .Column(t => t.Status, c => c.WithName("status").WithDbType<int>())
-                .Column(t => t.Permission, c => c.WithName("permission").WithDbType<int>())
-                .Column(t => t.EntityType, c => c.WithName("entity_type").WithDbType<int>()));
-
-        var provenanceMapping = new MappingConfiguration()
-            .Define(new Map<DataProvenance>()
-                .PartitionKey(t => t.EntityId)
-                .ClusteringKey(t => t.ChangedAt)
-                .Column(t => t.ChangeType, c => c.WithName("change_type").WithDbType<int>()));
-
-        var conflictMapping = new MappingConfiguration()
-            .Define(new Map<DataConflict>()
-                .PartitionKey(t => t.UserId)
-                .ClusteringKey(t => t.EntityId)
-                .ClusteringKey(t => t.FieldName)
-                .Column(t => t.Resolution, c => c.WithName("resolution").WithDbType<int>()));
-
-        _invitations = new Table<ShareInvitation>(session, invitationMapping);
-        _invitationsByRecipient = new Table<ShareInvitationByRecipient>(session, byRecipientMapping);
-        _provenance = new Table<DataProvenance>(session, provenanceMapping);
-        _conflicts = new Table<DataConflict>(session, conflictMapping);
+        _invitations = new Table<ShareInvitation>(session, GlobalMapping.Instance);
+        _invitationsByRecipient = new Table<ShareInvitationByRecipient>(session, GlobalMapping.Instance);
+        _provenance = new Table<DataProvenance>(session, GlobalMapping.Instance);
+        _conflicts = new Table<DataConflict>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -291,53 +259,6 @@ public class ShareService
 
     private void TryEnsureLcs(string tableName)
     {
-        try
-        {
-            var keyspace = _session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace) || _session == null)
-            {
-                _logger.LogDebug("Session has no keyspace; skipping LCS check for {Table}", tableName);
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            global::Cassandra.Row? row = null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = _session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                _logger.LogDebug("Table {Table} not yet visible in system_schema; skipping LCS", tableName);
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogDebug("Table {Table} already uses compaction {Class}", tableName, cls);
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            _session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
-        }
+        SchemaHelper.TryEnsureLcs(_session, _logger, tableName);
     }
 }

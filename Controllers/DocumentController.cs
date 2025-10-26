@@ -1,6 +1,7 @@
 using Coflnet.Connections.DTOs;
 using Coflnet.Connections.Models;
 using Coflnet.Connections.Services;
+using Coflnet.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -24,7 +25,7 @@ public class DocumentController : ControllerBase
         _logger = logger;
     }
 
-    private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException());
+    // use this.GetUserId() from Coflnet.Auth extension
 
     /// <summary>
     /// Get a presigned URL for uploading a document
@@ -32,7 +33,7 @@ public class DocumentController : ControllerBase
     [HttpPost("upload-url")]
     public async Task<ActionResult<PresignedUrlDto>> GetUploadUrl([FromQuery] string fileName, [FromQuery] string? contentType = null)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var result = await _documentService.GetUploadUrl(userId, fileName, contentType ?? "application/octet-stream");
 
@@ -52,7 +53,7 @@ public class DocumentController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Document>> CreateDocument([FromBody] UploadDocumentDto dto)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var document = await _documentService.CreateDocument(
             userId,
@@ -78,7 +79,7 @@ public class DocumentController : ControllerBase
     [HttpGet("{documentId}/download-url")]
     public async Task<ActionResult<PresignedUrlDto>> GetDownloadUrl(Guid documentId)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var result = await _documentService.GetDownloadUrl(userId, documentId);
 
@@ -98,7 +99,7 @@ public class DocumentController : ControllerBase
     [HttpPost("link")]
     public async Task<IActionResult> LinkDocumentToEntity([FromBody] LinkDocumentDto dto)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var success = await _documentService.LinkDocumentToEntity(userId, dto);
 
@@ -119,7 +120,7 @@ public class DocumentController : ControllerBase
     [HttpGet("entity/{entityId}")]
     public async Task<ActionResult<IEnumerable<Document>>> GetDocumentsByEntity(Guid entityId)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var documents = await _documentService.GetDocumentsByEntity(userId, entityId);
 
@@ -132,7 +133,7 @@ public class DocumentController : ControllerBase
     [HttpGet("quota")]
     public async Task<ActionResult<StorageQuota>> GetStorageQuota()
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var quota = await _documentService.GetStorageQuota(userId);
 
@@ -145,7 +146,7 @@ public class DocumentController : ControllerBase
     [HttpDelete("{documentId}")]
     public async Task<IActionResult> DeleteDocument(Guid documentId)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var success = await _documentService.DeleteDocument(userId, documentId);
 
@@ -165,7 +166,7 @@ public class DocumentController : ControllerBase
     [HttpGet("{documentId}")]
     public async Task<ActionResult<Document>> GetDocument(Guid documentId)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var document = await _documentService.GetDocument(userId, documentId);
 

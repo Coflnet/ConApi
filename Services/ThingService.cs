@@ -23,28 +23,9 @@ public class ThingService
         _logger = logger;
         _searchService = searchService;
 
-        var thingMapping = new MappingConfiguration()
-            .Define(new Map<Thing>()
-                .PartitionKey(t => t.UserId, t => t.Name)
-                .ClusteringKey(t => t.Id)
-                .Column(t => t.Type, c => c.WithName("type").WithDbType<int>())
-                .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>()));
-
-        var thingDataMapping = new MappingConfiguration()
-            .Define(new Map<ThingData>()
-                .PartitionKey(t => t.UserId, t => t.ThingId)
-                .ClusteringKey(t => t.Category)
-                .ClusteringKey(t => t.Key));
-
-        var byOwnerMapping = new MappingConfiguration()
-            .Define(new Map<ThingByOwner>()
-                .PartitionKey(t => t.UserId)
-                .ClusteringKey(t => t.OwnerId)
-                .ClusteringKey(t => t.ThingId));
-
-        _things = new Table<Thing>(session, thingMapping);
-        _thingData = new Table<ThingData>(session, thingDataMapping);
-        _thingsByOwner = new Table<ThingByOwner>(session, byOwnerMapping);
+        _things = new Table<Thing>(session, GlobalMapping.Instance);
+        _thingData = new Table<ThingData>(session, GlobalMapping.Instance);
+        _thingsByOwner = new Table<ThingByOwner>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -52,10 +33,71 @@ public class ThingService
     /// </summary>
     public void EnsureSchema()
     {
-        // The Table<T>.CreateIfNotExists is idempotent and safe to call multiple times.
-        _things.CreateIfNotExists();
-        _thingData.CreateIfNotExists();
-        _thingsByOwner.CreateIfNotExists();
+        try
+        {
+            var ksNullable = _session?.Keyspace;
+            if (string.IsNullOrEmpty(ksNullable)) throw new InvalidOperationException("Session has no keyspace set");
+            var ks = ksNullable!;
+
+            var createThing = @"CREATE TABLE IF NOT EXISTS thing (
+                user_id uuid,
+                name text,
+                id uuid,
+                type int,
+                owner_id uuid,
+                manufacturer text,
+                year_made int,
+                model text,
+                serial_number text,
+                attributes map<text,text>,
+                created_at timestamp,
+                updated_at timestamp,
+                PRIMARY KEY ((user_id, name), id)
+            );";
+
+            var createThingData = @"CREATE TABLE IF NOT EXISTS thing_data (
+                user_id uuid,
+                thing_id uuid,
+                category text,
+                key text,
+                value text,
+                changed_at timestamp,
+                PRIMARY KEY ((user_id, thing_id), category, key)
+            );";
+
+            var createByOwner = @"CREATE TABLE IF NOT EXISTS thing_by_owner (
+                user_id uuid,
+                owner_id uuid,
+                thing_id uuid,
+                name text,
+                type int,
+                created_at timestamp,
+                updated_at timestamp,
+                PRIMARY KEY (user_id, owner_id, thing_id)
+            );";
+
+            if (_session != null)
+            {
+                _session.Execute(new SimpleStatement(createThing.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
+                _session.Execute(new SimpleStatement(createThingData.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
+                _session.Execute(new SimpleStatement(createByOwner.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create thing tables via CQL in EnsureSchema(); will fall back to driver CreateIfNotExists().");
+            try
+            {
+                // The Table<T>.CreateIfNotExists is idempotent and safe to call multiple times.
+                _things.CreateIfNotExists();
+                _thingData.CreateIfNotExists();
+                _thingsByOwner.CreateIfNotExists();
+            }
+            catch (Exception inner)
+            {
+                _logger.LogError(inner, "Fallback Table<T>.CreateIfNotExists() also failed in EnsureSchema()");
+            }
+        }
 
         // Prefer Leveled Compaction Strategy for read-heavy tables.
         TryEnsureLcs("thing");
@@ -65,61 +107,7 @@ public class ThingService
 
     private void TryEnsureLcs(string tableName)
     {
-        // Wait briefly for table metadata to appear in system_schema (schema propagation) before attempting ALTER.
-        try
-        {
-            var keyspace = _session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace))
-            {
-                _logger.LogDebug("Session has no keyspace; skipping LCS check for {Table}", tableName);
-                return;
-            }
-
-            if (_session == null)
-            {
-                _logger.LogDebug("No session available when checking compaction for {Table}", tableName);
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            global::Cassandra.Row? row = null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = _session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                _logger.LogDebug("Table {Table} not yet visible in system_schema; skipping LCS", tableName);
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogDebug("Table {Table} already uses compaction {Class}", tableName, cls);
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            _session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
-        }
+        SchemaHelper.TryEnsureLcs(_session, _logger, tableName);
     }
 
     /// <summary>

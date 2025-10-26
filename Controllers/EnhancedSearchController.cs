@@ -1,3 +1,4 @@
+using Coflnet.Auth;
 using Coflnet.Connections.DTOs;
 using Coflnet.Connections.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -23,15 +24,13 @@ public class SearchController : ControllerBase
         _logger = logger;
     }
 
-    private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException());
-
     /// <summary>
     /// Advanced search with pagination and filtering
     /// </summary>
     [HttpPost("advanced")]
     public async Task<ActionResult<SearchResultPage>> SearchAdvanced([FromBody] AdvancedSearchRequest request)
     {
-        var userId = GetUserId();
+        var userId = this.GetUserId();
 
         if (string.IsNullOrWhiteSpace(request.Query))
         {
@@ -49,7 +48,7 @@ public class SearchController : ControllerBase
     [HttpGet("relational")]
     public async Task<ActionResult<IEnumerable<SearchResult>>> SearchRelational([FromQuery] string query)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -70,7 +69,7 @@ public class SearchController : ControllerBase
         [FromQuery] DateTime? endDate,
         [FromQuery] SearchEntry.ResultType? entityType = null)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var results = await _searchService.SearchByDateRange(userId, startDate, endDate, entityType);
 

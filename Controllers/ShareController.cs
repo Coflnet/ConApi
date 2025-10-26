@@ -1,6 +1,7 @@
 using Coflnet.Connections.DTOs;
 using Coflnet.Connections.Models;
 using Coflnet.Connections.Services;
+using Coflnet.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -24,7 +25,7 @@ public class ShareController : ControllerBase
         _logger = logger;
     }
 
-    private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException());
+    // use this.GetUserId() from Coflnet.Auth extension
 
     /// <summary>
     /// Create a new share invitation
@@ -32,7 +33,7 @@ public class ShareController : ControllerBase
     [HttpPost("invite")]
     public async Task<ActionResult<ShareInvitation>> CreateInvitation([FromBody] CreateShareInvitationDto dto)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
         var invitation = await _shareService.CreateInvitation(userId, dto);
 
         if (invitation == null)
@@ -52,7 +53,7 @@ public class ShareController : ControllerBase
     [HttpGet("invitations/sent")]
     public async Task<ActionResult<IEnumerable<ShareInvitation>>> GetSentInvitations()
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
         var invitations = await _shareService.GetInvitationsByUser(userId, sent: true);
 
         return Ok(invitations);
@@ -64,7 +65,7 @@ public class ShareController : ControllerBase
     [HttpGet("invitations/received")]
     public async Task<ActionResult<IEnumerable<ShareInvitation>>> GetReceivedInvitations([FromQuery] bool? pendingOnly = true)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         if (pendingOnly == true)
         {
@@ -82,7 +83,7 @@ public class ShareController : ControllerBase
     [HttpPost("invitations/{invitationId}/respond")]
     public async Task<IActionResult> RespondToInvitation(Guid invitationId, [FromBody] RespondToInvitationDto dto)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var result = await _shareService.RespondToInvitation(userId, invitationId, dto.Accept, dto.DefaultConflictResolution ?? ConflictResolution.Manual);
 
@@ -103,7 +104,7 @@ public class ShareController : ControllerBase
     [HttpGet("history/{entityId}")]
     public async Task<ActionResult<IEnumerable<DataProvenance>>> GetChangeHistory(Guid entityId)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
         var history = await _shareService.GetChangeHistory(entityId);
 
         return Ok(history);
@@ -113,9 +114,9 @@ public class ShareController : ControllerBase
     /// Get all unresolved conflicts
     /// </summary>
     [HttpGet("conflicts")]
-    public async Task<ActionResult<IEnumerable<DataConflict>>> GetUnresolvedConflicts()
+    public async Task<ActionResult<IEnumerable<DataConflict>>> GetShareUnresolvedConflicts()
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
         var conflicts = await _shareService.GetUnresolvedConflicts(userId);
 
         return Ok(conflicts);
@@ -125,9 +126,9 @@ public class ShareController : ControllerBase
     /// Resolve a data conflict
     /// </summary>
     [HttpPost("conflicts/resolve")]
-    public async Task<IActionResult> ResolveConflict([FromBody] ResolveConflictDto dto)
+    public async Task<IActionResult> ResolveShareConflict([FromBody] ResolveConflictDto dto)
     {
-        var userId = GetUserId();
+        var userId = this.GetUserId();
 
         var result = await _shareService.ResolveConflict(
             userId,
@@ -152,7 +153,7 @@ public class ShareController : ControllerBase
     [HttpPost("export")]
     public async Task<IActionResult> ExportData([FromBody] ExportRequestDto dto, [FromServices] ExportService exportService)
     {
-        var userId = GetUserId();
+        var userId = this.GetUserId();
 
         var json = await exportService.ExportToJson(userId, dto);
 
@@ -170,7 +171,7 @@ public class ShareController : ControllerBase
     [HttpPost("import")]
     public async Task<ActionResult<ImportResult>> ImportData([FromBody] string jsonData, [FromServices] ExportService exportService)
     {
-        var userId = GetUserId();
+        var userId = this.GetUserId();
 
         var result = await exportService.ImportFromJson(userId, jsonData);
 

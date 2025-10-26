@@ -48,36 +48,10 @@ public class DocumentService
             _logger.LogWarning("S3 configuration not complete - document storage will not be available");
         }
 
-        var documentMapping = new MappingConfiguration()
-            .Define(new Map<Document>()
-                .PartitionKey(t => t.UserId, t => t.FileName)
-                .ClusteringKey(t => t.Id)
-                .Column(t => t.Type, c => c.WithName("type").WithDbType<int>())
-                .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>()));
-
-        var linkMapping = new MappingConfiguration()
-            .Define(new Map<DocumentLink>()
-                .PartitionKey(t => t.UserId)
-                .ClusteringKey(t => t.EntityId)
-                .ClusteringKey(t => t.DocumentId)
-                .Column(t => t.EntityType, c => c.WithName("entity_type").WithDbType<int>()));
-
-        var byEntityMapping = new MappingConfiguration()
-            .Define(new Map<DocumentByEntity>()
-                .PartitionKey(t => t.UserId)
-                .ClusteringKey(t => t.EntityId)
-                .ClusteringKey(t => t.DisplayOrder)
-                .ClusteringKey(t => t.DocumentId)
-                .Column(t => t.Type, c => c.WithName("type").WithDbType<int>()));
-
-        var quotaMapping = new MappingConfiguration()
-            .Define(new Map<StorageQuota>()
-                .PartitionKey(t => t.UserId));
-
-        _documents = new Table<Document>(session, documentMapping);
-        _documentLinks = new Table<DocumentLink>(session, linkMapping);
-        _documentsByEntity = new Table<DocumentByEntity>(session, byEntityMapping);
-        _storageQuotas = new Table<StorageQuota>(session, quotaMapping);
+        _documents = new Table<Document>(session, GlobalMapping.Instance);
+        _documentLinks = new Table<DocumentLink>(session, GlobalMapping.Instance);
+        _documentsByEntity = new Table<DocumentByEntity>(session, GlobalMapping.Instance);
+        _storageQuotas = new Table<StorageQuota>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -346,53 +320,6 @@ public class DocumentService
 
     private void TryEnsureLcs(string tableName)
     {
-        try
-        {
-            var keyspace = _session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace) || _session == null)
-            {
-                _logger.LogDebug("Session has no keyspace; skipping LCS check for {Table}", tableName);
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            global::Cassandra.Row? row = null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = _session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                _logger.LogDebug("Table {Table} not yet visible in system_schema; skipping LCS", tableName);
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogDebug("Table {Table} already uses compaction {Class}", tableName, cls);
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            _session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
-        }
+        SchemaHelper.TryEnsureLcs(_session, _logger, tableName);
     }
 }

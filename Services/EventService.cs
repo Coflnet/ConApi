@@ -23,23 +23,8 @@ public class EventService
         _logger = logger;
         _searchService = searchService;
         
-        var eventMapping = new MappingConfiguration()
-            .Define(new Map<Event>()
-                .PartitionKey(t => t.UserId, t => t.Title)
-                .ClusteringKey(t => t.EventDate)
-                .ClusteringKey(t => t.TargetEntityId)
-                .Column(t => t.Type, c => c.WithName("type").WithDbType<int>())
-                .Column(t => t.TargetEntityType, c => c.WithName("target_entity_type").WithDbType<int>())
-                .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>()));
-                
-        var eventDataMapping = new MappingConfiguration()
-            .Define(new Map<EventData>()
-                .PartitionKey(t => t.UserId, t => t.EventId)
-                .ClusteringKey(t => t.Category)
-                .ClusteringKey(t => t.Key));
-        
-        _events = new Table<Event>(session, eventMapping);
-        _eventData = new Table<EventData>(session, eventDataMapping);
+        _events = new Table<Event>(session, GlobalMapping.Instance);
+        _eventData = new Table<EventData>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -63,19 +48,19 @@ public class EventService
         
         var query = _events.Where(e => e.UserId == userId).Take(10000);
         var allEvents = await query.ExecuteAsync();
-        
-    var filtered = allEvents.Where(e => e.TargetEntityId == targetEntityId);
-        
+
+        var filtered = allEvents.Where(e => e.TargetEntityId == targetEntityId);
+
         if (startDate.HasValue)
         {
             filtered = filtered.Where(e => e.EventDate >= startDate.Value);
         }
-        
+
         if (endDate.HasValue)
         {
             filtered = filtered.Where(e => e.EventDate <= endDate.Value);
         }
-        
+
         return filtered.OrderBy(e => e.EventDate);
     }
 
@@ -231,70 +216,72 @@ public class EventService
     /// </summary>
     public void EnsureSchema()
     {
-        _events.CreateIfNotExists();
-        _eventData.CreateIfNotExists();
+        try
+        {
+            var ksNullable = _session?.Keyspace;
+            if (string.IsNullOrEmpty(ksNullable)) throw new InvalidOperationException("Session has no keyspace set");
+            var ks = ksNullable!;
+
+            var createEvent = @"CREATE TABLE IF NOT EXISTS event (
+                user_id uuid,
+                title text,
+                event_date timestamp,
+                target_entity_id uuid,
+                type int,
+                target_entity_type int,
+                privacy_level int,
+                attributes map<text,text>,
+                description text,
+                place_id uuid,
+                id uuid,
+                created_at timestamp,
+                updated_at timestamp,
+                PRIMARY KEY ((user_id, title), event_date, target_entity_id)
+            );";
+
+            var createEventData = @"CREATE TABLE IF NOT EXISTS event_data (
+                user_id uuid,
+                event_id uuid,
+                category text,
+                key text,
+                value text,
+                changed_at timestamp,
+                PRIMARY KEY ((user_id, event_id), category, key)
+            );";
+
+            if (_session != null)
+            {
+                _session.Execute(new SimpleStatement(createEvent.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
+                _session.Execute(new SimpleStatement(createEventData.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create event tables via CQL in EnsureSchema(); falling back to driver CreateIfNotExists()");
+            try
+            {
+                _events.CreateIfNotExists();
+                _eventData.CreateIfNotExists();
+            }
+            catch (Exception inner)
+            {
+                _logger.LogError(inner, "Fallback CreateIfNotExists failed for event schema");
+            }
+        }
 
         TryEnsureLcs("event");
         TryEnsureLcs("event_data");
+
+        // Ensure flexible attributes column exists for events
+        if (_session != null)
+        {
+            SchemaHelper.TryEnsureColumn(_session, _logger, "event", "attributes", "map<text,text>");
+        }
     }
 
     private void TryEnsureLcs(string tableName)
     {
-        // Wait briefly for table metadata to appear in system_schema (schema propagation) before attempting ALTER.
-        try
-        {
-            var keyspace = _session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace))
-            {
-                _logger.LogDebug("Session has no keyspace; skipping LCS check for {Table}", tableName);
-                return;
-            }
-
-            if (_session == null)
-            {
-                _logger.LogDebug("No session available when checking compaction for {Table}", tableName);
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            global::Cassandra.Row? row = null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = _session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                _logger.LogDebug("Table {Table} not yet visible in system_schema; skipping LCS", tableName);
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogDebug("Table {Table} already uses compaction {Class}", tableName, cls);
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            _session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
-        }
+        SchemaHelper.TryEnsureLcs(_session, _logger, tableName);
     }
 
     /// <summary>

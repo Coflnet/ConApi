@@ -1,7 +1,9 @@
+using Cassandra;
 using Cassandra.Data.Linq;
 using Cassandra.Mapping;
 using ISession = Cassandra.ISession;
 using Coflnet.Connections;
+using System.Linq;
 
 namespace Coflnet.Connections.Services;
 
@@ -10,30 +12,35 @@ public class PersonService
     ISession session;
     Table<Person> persons;
     private readonly SearchService _searchService;
+    private readonly ISession _sessionInternal;
 
     public PersonService(ISession session, SearchService searchService)
     {
         this.session = session;
         _searchService = searchService;
-        var mapping = new MappingConfiguration()
-            .Define(new Map<Person>()
-                .PartitionKey(t => t.UserId, t => t.Name)
-                .ClusteringKey(t => t.Birthday)
-                .ClusteringKey(t => t.BirthPlace)
-                .Column(t => t.Gender, c => c.WithName("gender").WithDbType<int>())
-                .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>())
-            );
-        persons = new Table<Person>(session, mapping);
+        persons = new Table<Person>(session, GlobalMapping.Instance);
+        // Use session directly for person_data fallback operations
+        _sessionInternal = session;
     }
 
     /// <summary>
-    /// Get flexible attributes for a person identified by name (legacy composite key)
+    /// Get flexible attributes for a person identified by name (legacy composite key) — now deprecated.
+    /// For backward compatibility, reads from person_data fallback table by name.
     /// </summary>
     public async Task<IDictionary<string,string>> GetAttributesByName(Guid userId, string name)
     {
-        var rows = await persons.Where(p => p.UserId == userId && p.Name == name).ExecuteAsync();
-        var first = rows.FirstOrDefault();
-        return first?.Attributes ?? new Dictionary<string,string>();
+        try
+        {
+            var keyspace = _sessionInternal.Keyspace;
+            if (!string.IsNullOrEmpty(keyspace))
+            {
+                var cql = $"SELECT key, value FROM {keyspace}.person_data WHERE user_id = ? AND name = ?";
+                var rs = await _sessionInternal.ExecuteAsync(new SimpleStatement(cql, userId, name));
+                return rs.ToDictionary(r => r.GetValue<string>("key"), r => r.GetValue<string>("value"));
+            }
+        }
+        catch { }
+        return new Dictionary<string, string>();
     }
 
     /// <summary>
@@ -41,9 +48,45 @@ public class PersonService
     /// </summary>
     public async Task<IDictionary<string,string>> GetAttributesByPersonId(Guid userId, Guid personId)
     {
-        var rows = await persons.Where(p => p.UserId == userId && p.Id == personId).ExecuteAsync();
-        var first = rows.FirstOrDefault();
-        return first?.Attributes ?? new Dictionary<string,string>();
+        try
+        {
+            // Direct lookup by userId and personId (no filtering needed)
+            var rows = await persons.Where(p => p.UserId == userId && p.Id == personId).ExecuteAsync();
+            var first = rows.FirstOrDefault();
+            var result = first?.Attributes ?? new Dictionary<string, string>();
+
+            // Also merge any fallback person_data rows (raw CQL)
+            try
+            {
+                var keyspace = _sessionInternal.Keyspace;
+                if (!string.IsNullOrEmpty(keyspace))
+                {
+                    var cql = $"SELECT key, value FROM {keyspace}.person_data WHERE user_id = ? AND person_id = ?";
+                    var rs = await _sessionInternal.ExecuteAsync(new SimpleStatement(cql, userId, personId));
+                    foreach (var row in rs)
+                    {
+                        var k = row.GetValue<string>("key");
+                        var v = row.GetValue<string>("value");
+                        if (!result.ContainsKey(k)) result[k] = v;
+                    }
+                }
+            }
+            catch { }
+
+            return result;
+        }
+        catch (InvalidQueryException)
+        {
+            // Fallback to PersonData table if person row can't be read
+            var keyspace = _sessionInternal.Keyspace;
+            if (!string.IsNullOrEmpty(keyspace))
+            {
+                var cql = $"SELECT key, value FROM {keyspace}.person_data WHERE user_id = ? AND person_id = ?";
+                var rs = await _sessionInternal.ExecuteAsync(new SimpleStatement(cql, userId, personId));
+                return rs.ToDictionary(r => r.GetValue<string>("key"), r => r.GetValue<string>("value"));
+            }
+            return new Dictionary<string, string>();
+        }
     }
 
     /// <summary>
@@ -51,15 +94,16 @@ public class PersonService
     /// </summary>
     public async Task UpsertAttribute(Guid userId, Guid? personId, string name, string key, string value)
     {
+        await UpsertAttributeInternal(userId, personId, name, key, value);
+    }
+
+    private async Task UpsertAttributeInternal(Guid userId, Guid? personId, string name, string key, string value)
+    {
         Person? p = null;
         if (personId.HasValue)
         {
+            // Direct lookup by userId and personId (UUID-based)
             var rows = await persons.Where(x => x.UserId == userId && x.Id == personId.Value).ExecuteAsync();
-            p = rows.FirstOrDefault();
-        }
-        else if (!string.IsNullOrEmpty(name))
-        {
-            var rows = await persons.Where(x => x.UserId == userId && x.Name == name).ExecuteAsync();
             p = rows.FirstOrDefault();
         }
 
@@ -78,13 +122,30 @@ public class PersonService
         if (p.Attributes == null) p.Attributes = new Dictionary<string,string>();
         p.Attributes[key] = value;
         p.UpdatedAt = DateTime.UtcNow;
-        // If this row already existed (has non-empty CreatedAt) update, otherwise insert
-        // In Cassandra INSERT acts as an upsert (writes provided columns). Use Insert to upsert the person row.
         if (p.CreatedAt == default)
         {
             p.CreatedAt = DateTime.UtcNow;
         }
-        await persons.Insert(p).ExecuteAsync();
+        try
+        {
+            await persons.Insert(p).ExecuteAsync();
+        }
+        catch (InvalidQueryException)
+        {
+            // Could be a marshaling error for the Attributes map column (schema mismatch).
+            // Fallback: persist the single attribute into person_data table to avoid losing the update.
+            try
+            {
+                var keyspace = _sessionInternal.Keyspace;
+                if (!string.IsNullOrEmpty(keyspace))
+                {
+                    var cql = $"INSERT INTO {keyspace}.person_data (user_id, person_id, name, key, value, changed_at) VALUES (?, ?, ?, ?, ?, toTimestamp(now()))";
+                    var nameToUse = p.Name ?? string.Empty;
+                    await _sessionInternal.ExecuteAsync(new SimpleStatement(cql, p.UserId, p.Id, nameToUse, key, value));
+                }
+            }
+            catch { }
+        }
 
         // If the attribute updated is 'name', update search index
         try
@@ -104,65 +165,39 @@ public class PersonService
     {
         persons.CreateIfNotExists();
         TryEnsureLcs("person");
+        // Ensure fallback table person_data exists so we can persist single attributes
+        try
+        {
+            var keyspace = session?.Keyspace;
+            var s = session;
+            if (s != null && !string.IsNullOrEmpty(keyspace))
+            {
+                var create = $"CREATE TABLE IF NOT EXISTS {keyspace}.person_data (" +
+                             "user_id uuid, " +
+                             "person_id uuid, " +
+                             "name text, " +
+                             "key text, " +
+                             "value text, " +
+                             "changed_at timestamp, " +
+                             "PRIMARY KEY (user_id, person_id, name, key)" +
+                             ")";
+                s.Execute(new global::Cassandra.SimpleStatement(create));
+
+                // Create helpful secondary indexes so we can query by name or person_id
+                var idxName = $"CREATE INDEX IF NOT EXISTS ON {keyspace}.person_data (name)";
+                var idxPerson = $"CREATE INDEX IF NOT EXISTS ON {keyspace}.person_data (person_id)";
+                s.Execute(new global::Cassandra.SimpleStatement(idxName));
+                s.Execute(new global::Cassandra.SimpleStatement(idxPerson));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to ensure person_data table: {ex.Message}");
+        }
     }
 
     private void TryEnsureLcs(string tableName)
     {
-        // Wait briefly for table metadata to appear in system_schema (schema propagation) before attempting ALTER.
-        try
-        {
-            var keyspace = session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace))
-            {
-                Console.WriteLine($"Session has no keyspace; skipping LCS check for {tableName}");
-                return;
-            }
-
-            if (session == null)
-            {
-                Console.WriteLine($"No session available when checking compaction for {tableName}");
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            // Poll for the table to appear in system_schema (schema propagation can be slightly delayed)
-            var row = (global::Cassandra.Row?)null;
-            for (int i = 0; i < 6; i++) // try ~3 seconds total (6 * 500ms)
-            {
-                var rs = session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                Console.WriteLine($"Table {tableName} not yet visible in system_schema; skipping LCS");
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"Table {tableName} already uses compaction {cls}");
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"EnsureLcs failed for {tableName}: {ex.Message}");
-        }
+        SchemaHelper.TryEnsureLcs(session, null, tableName);
     }
 }

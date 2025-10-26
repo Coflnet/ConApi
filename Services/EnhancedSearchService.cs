@@ -28,15 +28,7 @@ public class EnhancedSearchService
         _relationshipService = relationshipService;
         _logger = logger;
 
-        var mapping = new MappingConfiguration()
-            .Define(new Map<SearchEntry>()
-                .PartitionKey(t => t.UserId)
-                .ClusteringKey(t => t.KeyWord)
-                .ClusteringKey(t => t.Type)
-                .ClusteringKey(t => t.FullId)
-                .Column(o => o.Type, c => c.WithName("type").WithDbType<int>()));
-
-        _searchEntries = new Table<SearchEntry>(session, mapping);
+        _searchEntries = new Table<SearchEntry>(session, GlobalMapping.Instance);
     }
 
     /// <summary>

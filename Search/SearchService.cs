@@ -1,6 +1,8 @@
+using Cassandra;
 using Cassandra.Data.Linq;
 using Cassandra.Mapping;
 using ISession = Cassandra.ISession;
+using System.Text.RegularExpressions;
 
 namespace Coflnet.Connections.Services;
 public class SearchService
@@ -11,14 +13,7 @@ public class SearchService
     public SearchService(ISession session)
     {
         this.session = session;
-        var mapping = new MappingConfiguration()
-            .Define(new Map<SearchEntry>()
-            .PartitionKey(t => t.UserId)
-            .ClusteringKey(t => t.KeyWord)
-            .ClusteringKey(t => t.Type)
-            .ClusteringKey(t => t.FullId)
-        .Column(o => o.Type, c => c.WithName("type").WithDbType<int>()));
-        searchEntries = new Table<SearchEntry>(session, mapping);
+        searchEntries = new Table<SearchEntry>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -32,61 +27,7 @@ public class SearchService
 
     private void TryEnsureLcs(string tableName)
     {
-        // Wait briefly for table metadata to appear in system_schema (schema propagation) before attempting ALTER.
-        try
-        {
-            var keyspace = session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace))
-            {
-                Console.WriteLine($"Session has no keyspace; skipping LCS check for {tableName}");
-                return;
-            }
-
-            if (session == null)
-            {
-                Console.WriteLine($"No session available when checking compaction for {tableName}");
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            var row = (global::Cassandra.Row?)null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                Console.WriteLine($"Table {tableName} not yet visible in system_schema; skipping LCS");
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"Table {tableName} already uses compaction {cls}");
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"EnsureLcs failed for {tableName}: {ex.Message}");
-        }
+        SchemaHelper.TryEnsureLcs(session, null, tableName);
     }
 
     public async Task<IEnumerable<SearchResult>> Search(Guid userId, string value)
@@ -103,6 +44,8 @@ public class SearchService
         
         return result.SelectMany(x => x)
             .Distinct()
+            // Filter out entries whose FullId does not contain a UUID/GUID
+            .Where(e => FullIdContainsGuid(e.FullId))
             .Select(x=>(x,NormalizeText(x.Text)))
             .OrderBy(v=>search.DistanceFrom(v.Item2))
             .Take(10)
@@ -114,6 +57,14 @@ public class SearchService
                 Id = x.FullId.Replace("01/01/0001 00:00:00", "0001-01-01"),
                 Type = x.Type.ToString()
             });
+    }
+
+    private static bool FullIdContainsGuid(string fullId)
+    {
+        if (string.IsNullOrEmpty(fullId)) return false;
+        // GUID regex (hex groups with hyphens)
+        var rg = new Regex(@"[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}");
+        return rg.IsMatch(fullId);
     }
     public async Task AddEntry(Guid userId, string text, string fullId, SearchEntry.ResultType type = SearchEntry.ResultType.Unknown)
     {

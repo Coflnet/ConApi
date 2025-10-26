@@ -23,36 +23,13 @@ public class RelationshipService
         _session = session;
         _logger = logger;
         
-        var relationshipMapping = new MappingConfiguration()
-            .Define(new Map<Relationship>()
-                .PartitionKey(t => t.UserId, t => t.Id)
-                .ClusteringKey(t => t.FromEntityId)
-                .ClusteringKey(t => t.ToEntityId)
-                .Column(t => t.FromEntityType, c => c.WithName("from_entity_type").WithDbType<int>())
-                .Column(t => t.ToEntityType, c => c.WithName("to_entity_type").WithDbType<int>()));
-                
-        var typeMapping = new MappingConfiguration()
-            .Define(new Map<RelationshipType>()
-                .PartitionKey(t => t.Type)
-                .ClusteringKey(t => t.Language));
-        
-        _relationships = new Table<Relationship>(session, relationshipMapping);
-        var byFromMapping = new MappingConfiguration()
-            .Define(new Map<RelationshipByFrom>()
-                .PartitionKey(t => t.UserId)
-                .ClusteringKey(t => t.FromEntityId)
-                .ClusteringKey(t => t.ToEntityId));
-        var byToMapping = new MappingConfiguration()
-            .Define(new Map<RelationshipByTo>()
-                .PartitionKey(t => t.UserId)
-                .ClusteringKey(t => t.ToEntityId)
-                .ClusteringKey(t => t.FromEntityId));
-        _relationshipsByFrom = new Table<RelationshipByFrom>(session, byFromMapping);
-        _relationshipsByTo = new Table<RelationshipByTo>(session, byToMapping);
-        _relationshipTypes = new Table<RelationshipType>(session, typeMapping);
+        _relationships = new Table<Relationship>(session, GlobalMapping.Instance);
+        _relationshipsByFrom = new Table<RelationshipByFrom>(session, GlobalMapping.Instance);
+        _relationshipsByTo = new Table<RelationshipByTo>(session, GlobalMapping.Instance);
+        _relationshipTypes = new Table<RelationshipType>(session, GlobalMapping.Instance);
 
-        // Initialize default relationship types asynchronously (does not touch schema)
-        _ = InitializeDefaultRelationshipTypes();
+    // Do not initialize default relationship types here — schema may not yet exist.
+    // Initialization will be performed after EnsureSchema() creates tables.
     }
 
     /// <summary>
@@ -60,77 +37,131 @@ public class RelationshipService
     /// </summary>
     public void EnsureSchema()
     {
-        _relationships.CreateIfNotExists();
-        _relationshipsByFrom.CreateIfNotExists();
-        _relationshipsByTo.CreateIfNotExists();
-        _relationshipTypes.CreateIfNotExists();
+        try
+        {
+            var ksNullable = _session?.Keyspace;
+            var useQualified = !string.IsNullOrEmpty(ksNullable);
+            var ks = ksNullable;
+            // Create tables with explicit CQL types for enum columns (map enums to int)
+            var createRelationship = @"CREATE TABLE IF NOT EXISTS relationship (
+                user_id uuid,
+                id uuid,
+                from_entity_id uuid,
+                to_entity_id uuid,
+                from_entity_type int,
+                to_entity_type int,
+                relationship_type text,
+                language text,
+                start_date timestamp,
+                end_date timestamp,
+                certainty int,
+                source text,
+                notes text,
+                created_at timestamp,
+                updated_at timestamp,
+                is_primary boolean,
+                PRIMARY KEY ((user_id, id), from_entity_id, to_entity_id)
+            );";
+
+            var createByFrom = @"CREATE TABLE IF NOT EXISTS relationship_by_from (
+                user_id uuid,
+                from_entity_id uuid,
+                to_entity_id uuid,
+                id uuid,
+                from_entity_type int,
+                to_entity_type int,
+                relationship_type text,
+                language text,
+                start_date timestamp,
+                end_date timestamp,
+                certainty int,
+                source text,
+                notes text,
+                created_at timestamp,
+                updated_at timestamp,
+                is_primary boolean,
+                PRIMARY KEY (user_id, from_entity_id, to_entity_id)
+            );";
+
+            var createByTo = @"CREATE TABLE IF NOT EXISTS relationship_by_to (
+                user_id uuid,
+                to_entity_id uuid,
+                from_entity_id uuid,
+                id uuid,
+                from_entity_type int,
+                to_entity_type int,
+                relationship_type text,
+                language text,
+                start_date timestamp,
+                end_date timestamp,
+                certainty int,
+                source text,
+                notes text,
+                created_at timestamp,
+                updated_at timestamp,
+                is_primary boolean,
+                PRIMARY KEY (user_id, to_entity_id, from_entity_id)
+            );";
+
+            var createType = @"CREATE TABLE IF NOT EXISTS relationship_type (
+                type text,
+                language text,
+                display_name text,
+                inverse_type text,
+                category text,
+                PRIMARY KEY (type, language)
+            );";
+
+            // Execute CQL; if session has a keyspace, qualify table names, otherwise execute unqualified statements
+            if (_session != null)
+            {
+                if (useQualified)
+                {
+                    var q = ks!;
+                    _session.Execute(new SimpleStatement(createRelationship.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {q}.")));
+                    _session.Execute(new SimpleStatement(createByFrom.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {q}.")));
+                    _session.Execute(new SimpleStatement(createByTo.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {q}.")));
+                    _session.Execute(new SimpleStatement(createType.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {q}.")));
+                }
+                else
+                {
+                    _session.Execute(new SimpleStatement(createRelationship));
+                    _session.Execute(new SimpleStatement(createByFrom));
+                    _session.Execute(new SimpleStatement(createByTo));
+                    _session.Execute(new SimpleStatement(createType));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create relationship tables via CQL in EnsureSchema(); will fall back to driver CreateIfNotExists().");
+            try
+            {
+                _relationships.CreateIfNotExists();
+                _relationshipsByFrom.CreateIfNotExists();
+                _relationshipsByTo.CreateIfNotExists();
+                _relationshipTypes.CreateIfNotExists();
+            }
+            catch (Exception inner)
+            {
+                _logger.LogError(inner, "Fallback Table<T>.CreateIfNotExists() also failed in EnsureSchema()");
+            }
+        }
 
         TryEnsureLcs("relationship");
         TryEnsureLcs("relationship_by_from");
         TryEnsureLcs("relationship_by_to");
         TryEnsureLcs("relationship_type");
+
+        // Initialize default relationship types after ensuring schema exists.
+        // Fire-and-forget but log failures; this avoids attempts to write to a table
+        // that Cassandra hasn't created yet (schema propagation delay).
+        _ = InitializeDefaultRelationshipTypes();
     }
 
     private void TryEnsureLcs(string tableName)
     {
-        // Wait briefly for table metadata to appear in system_schema (schema propagation) before attempting ALTER.
-        try
-        {
-            var keyspace = _session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace))
-            {
-                _logger.LogDebug("Session has no keyspace; skipping LCS check for {Table}", tableName);
-                return;
-            }
-
-            if (_session == null)
-            {
-                _logger.LogDebug("No session available when checking compaction for {Table}", tableName);
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            global::Cassandra.Row? row = null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = _session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                _logger.LogDebug("Table {Table} not yet visible in system_schema; skipping LCS", tableName);
-                return; // table not visible yet
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogDebug("Table {Table} already uses compaction {Class}", tableName, cls);
-                    return; // already set
-                }
-            }
-            catch
-            {
-                // ignore parse errors and fall through to attempt ALTER
-            }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            _session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
-        }
+        SchemaHelper.TryEnsureLcs(_session, _logger, tableName);
     }
 
     /// <summary>

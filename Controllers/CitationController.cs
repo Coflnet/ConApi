@@ -1,4 +1,5 @@
 using Coflnet.Connections.Services;
+using Coflnet.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -22,7 +23,7 @@ public class CitationController : ControllerBase
         _logger = logger;
     }
 
-    private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException());
+    // use this.GetUserId() from Coflnet.Auth extension
 
     /// <summary>
     /// Add a source citation
@@ -30,7 +31,7 @@ public class CitationController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<SourceCitation>> AddCitation([FromBody] SourceCitation citation)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var result = await _citationService.AddCitation(userId, citation);
 
@@ -45,7 +46,7 @@ public class CitationController : ControllerBase
         Guid entityId,
         [FromQuery] string? fieldName = null)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var citations = await _citationService.GetCitations(userId, entityId, fieldName);
 
@@ -58,7 +59,7 @@ public class CitationController : ControllerBase
     [HttpGet("source/{sourceTitle}")]
     public async Task<ActionResult<IEnumerable<CitationBySource>>> GetCitationsBySource(string sourceTitle)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var citations = await _citationService.GetCitationsBySource(userId, sourceTitle);
 
@@ -71,7 +72,7 @@ public class CitationController : ControllerBase
     [HttpPost("conflict")]
     public async Task<ActionResult<ConflictingInformation>> RecordConflict([FromBody] RecordConflictRequest request)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var conflict = await _citationService.RecordConflict(
             userId,
@@ -91,7 +92,7 @@ public class CitationController : ControllerBase
     [HttpPost("conflict/resolve")]
     public async Task<ActionResult<ConflictingInformation>> ResolveConflict([FromBody] ResolveConflictRequest request)
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var result = await _citationService.ResolveConflict(
             userId,
@@ -114,7 +115,7 @@ public class CitationController : ControllerBase
     [HttpGet("conflicts/unresolved")]
     public async Task<ActionResult<IEnumerable<ConflictingInformation>>> GetUnresolvedConflicts()
     {
-        var userId = GetUserId();
+    var userId = this.GetUserId();
 
         var conflicts = await _citationService.GetUnresolvedConflicts(userId);
 

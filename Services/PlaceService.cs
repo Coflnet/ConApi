@@ -22,21 +22,8 @@ public class PlaceService
         _logger = logger;
         _searchService = searchService;
         
-        var placeMapping = new MappingConfiguration()
-            .Define(new Map<Place>()
-                .PartitionKey(t => t.UserId, t => t.Name)
-                .ClusteringKey(t => t.Id)
-                .Column(t => t.Type, c => c.WithName("type").WithDbType<int>())
-                .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>()));
-                
-        var placeDataMapping = new MappingConfiguration()
-            .Define(new Map<PlaceData>()
-                .PartitionKey(t => t.UserId, t => t.PlaceId)
-                .ClusteringKey(t => t.Category)
-                .ClusteringKey(t => t.Key));
-        
-        _places = new Table<Place>(session, placeMapping);
-        _placeData = new Table<PlaceData>(session, placeDataMapping);
+        _places = new Table<Place>(session, GlobalMapping.Instance);
+        _placeData = new Table<PlaceData>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -230,59 +217,6 @@ public class PlaceService
     private void TryEnsureLcs(string tableName)
     {
         // Wait briefly for table metadata to appear in system_schema (schema propagation) before attempting ALTER.
-        try
-        {
-            var keyspace = _session?.Keyspace;
-            if (string.IsNullOrEmpty(keyspace))
-            {
-                _logger.LogDebug("Session has no keyspace; skipping LCS check for {Table}", tableName);
-                return;
-            }
-
-            if (_session == null)
-            {
-                _logger.LogDebug("No session available when checking compaction for {Table}", tableName);
-                return;
-            }
-
-            var select = new global::Cassandra.SimpleStatement(
-                "SELECT compaction FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
-                keyspace, tableName);
-
-            global::Cassandra.Row? row = null;
-            for (int i = 0; i < 6; i++)
-            {
-                var rs = _session.Execute(select);
-                row = rs.FirstOrDefault();
-                if (row != null) break;
-                System.Threading.Thread.Sleep(500);
-            }
-
-            if (row == null)
-            {
-                _logger.LogDebug("Table {Table} not yet visible in system_schema; skipping LCS", tableName);
-                return;
-            }
-
-            try
-            {
-                var compaction = row.GetValue<IDictionary<string, string>>("compaction");
-                if (compaction != null && compaction.TryGetValue("class", out var cls) &&
-                    !string.IsNullOrEmpty(cls) && cls.Contains("LeveledCompactionStrategy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _logger.LogDebug("Table {Table} already uses compaction {Class}", tableName, cls);
-                    return;
-                }
-            }
-            catch { }
-
-            var target = $"{keyspace}.{tableName}";
-            var cql = $"ALTER TABLE {target} WITH compaction = {{'class':'LeveledCompactionStrategy'}}";
-            _session.Execute(new global::Cassandra.SimpleStatement(cql));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to ensure LCS for table {Table}", tableName);
-        }
+        SchemaHelper.TryEnsureLcs(_session, _logger, tableName);
     }
 }

@@ -9,21 +9,18 @@ namespace Coflnet.Connections;
 public class Person : BaseEntity
 {
     /// <summary>
-    /// Birth name (never changes, used for uniqueness with birthday and birthplace)
+    /// Birth name
     /// </summary>
-    [PartitionKey(1)]
     public string Name { get; set; } = string.Empty;
     
     /// <summary>
     /// Date of birth
     /// </summary>
-    [ClusteringKey(0)]
     public DateTime Birthday { get; set; }
     
     /// <summary>
     /// Place of birth (helps uniqueness)
     /// </summary>
-    [ClusteringKey(1)]
     public string BirthPlace { get; set; } = string.Empty;
     
     /// <summary>

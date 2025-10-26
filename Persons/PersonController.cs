@@ -222,4 +222,51 @@ public class PersonController : ControllerBase
 
         return Ok(result);
     }
+
+    /// <summary>
+    /// Test endpoint that creates a person and immediately fetches their full view to test schema initialization.
+    /// </summary>
+    [HttpPost("test-full-view")]
+    [Authorize]
+    public async Task<ActionResult<object>> TestFullViewFlow()
+    {
+        var userId = this.GetUserId();
+        _logger.LogInformation("Testing full person view flow for user {UserId}", userId);
+
+        try
+        {
+            // 1. Create a test person
+            var testPersonId = Guid.NewGuid();
+            var testPersonName = $"Test Person {DateTime.UtcNow:yyyyMMddHHmmss}";
+
+            await _personService.UpsertAttribute(userId, testPersonId, testPersonName, "name", testPersonName);
+            await _personService.UpsertAttribute(userId, testPersonId, testPersonName, "birthday", "1990-01-01");
+
+            _logger.LogInformation("Created test person {PersonId} for user {UserId}", testPersonId, userId);
+
+            // 2. Immediately fetch full view (tests schema readiness)
+            var fullView = await _personEnhancedService.GetPersonFull(userId, testPersonId);
+
+            _logger.LogInformation("Successfully fetched full person view for test person {PersonId}", testPersonId);
+
+            return Ok(new
+            {
+                Success = true,
+                PersonId = testPersonId,
+                PersonName = testPersonName,
+                FullView = fullView,
+                Message = "Full view test passed successfully"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Test full view flow failed for user {UserId}", userId);
+            return StatusCode(500, new
+            {
+                Success = false,
+                Error = ex.Message,
+                StackTrace = ex.StackTrace
+            });
+        }
+    }
 }
