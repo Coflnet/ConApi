@@ -16,7 +16,6 @@ public class Event : BaseEntity
     /// <summary>
     /// Title/name of the event
     /// </summary>
-    [PartitionKey(1)]
     public string Title { get; set; } = string.Empty;
     
     /// <summary>
@@ -24,6 +23,11 @@ public class Event : BaseEntity
     /// </summary>
     [ClusteringKey(0)]
     public DateTime EventDate { get; set; }
+
+    /// <summary>
+    /// Year of the event (used as a partition key for per-year partitions)
+    /// </summary>
+    public int EventYear { get; set; }
     
     /// <summary>
     /// End date for events with duration

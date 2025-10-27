@@ -46,8 +46,61 @@ public class EventService
         // Note: Requires materialized view or secondary index for production
         _logger.LogWarning("GetTimeline performs client-side filtering - consider adding materialized view");
         
-        var query = _events.Where(e => e.UserId == userId).Take(10000);
-        var allEvents = await query.ExecuteAsync();
+        // With the new partitioning by (user_id, event_year, target_entity_id) we query per-year
+        var collected = new List<Event>();
+        // derive year bounds from requested start/end or default to current year
+        int startYear = (startDate ?? DateTime.UtcNow).Year;
+        int endYear = (endDate ?? DateTime.UtcNow).Year;
+
+        // If requested range is large, constrain to +/-20 years around startYear
+        int minYear = Math.Min(startYear, endYear);
+        int maxYear = Math.Max(startYear, endYear);
+
+        // Expand the search window up to 20 years if needed
+        int yearsChecked = 0;
+        // We'll search ascending from minYear to maxYear, then expand outward until we've checked up to 20 years
+        var yearsToCheck = new HashSet<int>();
+        for (int y = minYear; y <= maxYear; y++) yearsToCheck.Add(y);
+
+        int left = minYear - 1;
+        int right = maxYear + 1;
+        while (yearsChecked < 20 && yearsToCheck.Count < 20)
+        {
+            if (left >= minYear - 20) { yearsToCheck.Add(left); left--; }
+            if (yearsToCheck.Count >= 20) break;
+            if (right <= maxYear + 20) { yearsToCheck.Add(right); right++; }
+            yearsChecked = yearsToCheck.Count;
+        }
+
+        // For each year, read the partition for (userId, year, targetEntityId)
+        foreach (var year in yearsToCheck.OrderBy(y => y))
+        {
+            try
+            {
+                var rows = await _events
+                    .Where(e => e.UserId == userId && e.EventYear == year && e.TargetEntityId == targetEntityId)
+                    .Take(1000)
+                    .ExecuteAsync();
+                collected.AddRange(rows);
+                // If we already have events covering the requested date range, stop early
+                if (startDate.HasValue || endDate.HasValue)
+                {
+                    var within = collected.Where(e => (!startDate.HasValue || e.EventDate >= startDate.Value) && (!endDate.HasValue || e.EventDate <= endDate.Value));
+                    if (within.Any()) break;
+                }
+                else
+                {
+                    if (collected.Any()) break;
+                }
+            }
+            catch (Exception ex)
+            {
+                // if a prepare error happens for a year (schema not yet visible), refresh metadata and retry next year
+                _logger.LogDebug(ex, "Error querying events for year {Year}; continuing with next year", year);
+            }
+        }
+
+        var allEvents = collected;
 
         var filtered = allEvents.Where(e => e.TargetEntityId == targetEntityId);
 
@@ -113,6 +166,11 @@ public class EventService
         if (ev.CreatedAt == default)
         {
             ev.CreatedAt = DateTime.UtcNow;
+        }
+        // Ensure EventYear is set from EventDate for partitioning
+        if (ev.EventDate != default)
+        {
+            ev.EventYear = ev.EventDate.Year;
         }
         
         await _events.Insert(ev).ExecuteAsync();
@@ -225,8 +283,10 @@ public class EventService
             var createEvent = @"CREATE TABLE IF NOT EXISTS event (
                 user_id uuid,
                 title text,
+                event_year int,
                 event_date timestamp,
                 target_entity_id uuid,
+                end_date timestamp,
                 type int,
                 target_entity_type int,
                 privacy_level int,
@@ -236,7 +296,7 @@ public class EventService
                 id uuid,
                 created_at timestamp,
                 updated_at timestamp,
-                PRIMARY KEY ((user_id, title), event_date, target_entity_id)
+                PRIMARY KEY ((user_id, event_year, target_entity_id), event_date, id)
             );";
 
             var createEventData = @"CREATE TABLE IF NOT EXISTS event_data (
@@ -276,6 +336,10 @@ public class EventService
         if (_session != null)
         {
             SchemaHelper.TryEnsureColumn(_session, _logger, "event", "attributes", "map<text,text>");
+            // Ensure end_date column exists (used by Event.EndDate mapping)
+            SchemaHelper.TryEnsureColumn(_session, _logger, "event", "end_date", "timestamp");
+            // Ensure event_year exists
+            SchemaHelper.TryEnsureColumn(_session, _logger, "event", "event_year", "int");
         }
     }
 
