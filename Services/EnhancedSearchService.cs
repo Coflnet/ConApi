@@ -51,8 +51,11 @@ public class EnhancedSearchService
 
         var results = await Task.WhenAll(tasks);
 
+        // Flatten results, filter to entries whose FullId is exactly a GUID and deduplicate by FullId
         var allResults = results.SelectMany(x => x)
-            .Distinct()
+            .Where(e => FullIdIsGuid(e.FullId))
+            .GroupBy(e => e.FullId)
+            .Select(g => g.First())
             .Select(x => (Entry: x, Normalized: NormalizeText(x.Text)));
 
         // Apply entity type filter
@@ -105,6 +108,14 @@ public class EnhancedSearchService
                 })
                 .OrderByDescending(f => f.Count)
                 .ToList();
+        }
+
+        // Local helper to validate FullId is an exact GUID
+        static bool FullIdIsGuid(string fullId)
+        {
+            if (string.IsNullOrEmpty(fullId)) return false;
+            var rg = new System.Text.RegularExpressions.Regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$");
+            return rg.IsMatch(fullId);
         }
 
         return new SearchResultPage

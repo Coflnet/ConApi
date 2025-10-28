@@ -62,8 +62,8 @@ public class SearchService
     private static bool FullIdContainsGuid(string fullId)
     {
         if (string.IsNullOrEmpty(fullId)) return false;
-        // GUID regex (hex groups with hyphens)
-        var rg = new Regex(@"[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}");
+        // GUID regex - must be EXACTLY a GUID (entire string), not just contain one
+        var rg = new Regex(@"^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$");
         return rg.IsMatch(fullId);
     }
     public async Task AddEntry(Guid userId, string text, string fullId, SearchEntry.ResultType type = SearchEntry.ResultType.Unknown)

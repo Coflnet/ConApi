@@ -15,6 +15,8 @@ public class SearchEntry
     {
         Unknown,
         Person,
-        Location
+        Location,
+        Thing,
+        Event,
     }
 }

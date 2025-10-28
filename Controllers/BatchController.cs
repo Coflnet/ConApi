@@ -43,30 +43,26 @@ public class BatchController : ControllerBase
         {
             try
             {
-                // Create person with name attribute first
-                Guid? personId = null;
+                // Create person with generated UUID
+                var newPersonId = Guid.NewGuid();
+                
+                // Add name attribute first
                 if (personData.Attributes.TryGetValue("name", out var name))
                 {
-                    await _personService.UpsertAttribute(userId, null, name, "name", name);
-                    
-                    // Get the created person ID (this is a simplification - in production you'd want to return it from UpsertAttribute)
-                    var attrs = await _personService.GetAttributesByName(userId, name);
-                    // personId would be determined from the response
+                    await _personService.UpsertAttribute(userId, newPersonId, name, "name", name);
                 }
 
                 // Add all other attributes
                 foreach (var attr in personData.Attributes.Where(a => a.Key != "name"))
                 {
-                    await _personService.UpsertAttribute(userId, personId, personData.Name, attr.Key, attr.Value);
+                    await _personService.UpsertAttribute(userId, newPersonId, personData.Name, attr.Key, attr.Value);
                 }
 
-                // Add to search index
-                var fullId = BuildSearchId(personData);
-                await _searchService.AddEntry(userId, personData.Name, fullId, SearchEntry.ResultType.Person);
+                // Add to search index with UUID only
+                await _searchService.AddEntry(userId, personData.Name, newPersonId.ToString(), SearchEntry.ResultType.Person);
 
                 result.SuccessCount++;
-                if (personId.HasValue)
-                    result.CreatedIds.Add(personId.Value);
+                result.CreatedIds.Add(newPersonId);
             }
             catch (Exception ex)
             {
@@ -80,12 +76,5 @@ public class BatchController : ControllerBase
             result.SuccessCount, result.FailureCount);
 
         return Ok(result);
-    }
-
-    private string BuildSearchId(PersonCreateDto person)
-    {
-        var date = person.Attributes.GetValueOrDefault("birthday", string.Empty);
-        var birthPlace = person.Attributes.GetValueOrDefault("birthplace", string.Empty);
-        return $"{person.Name};{date};{birthPlace}";
     }
 }

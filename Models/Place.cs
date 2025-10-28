@@ -11,7 +11,6 @@ public class Place : BaseEntity
     /// <summary>
     /// Name of the place
     /// </summary>
-    [PartitionKey(1)]
     public string Name { get; set; } = string.Empty;
     
     /// <summary>
@@ -94,4 +93,17 @@ public class PlaceData
     /// When this datapoint was last updated
     /// </summary>
     public DateTime ChangedAt { get; set; }
+}
+
+/// <summary>
+/// Denormalized table to support lookups by (user_id, name)
+/// </summary>
+public class PlaceByName
+{
+    public Guid UserId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public Guid PlaceId { get; set; }
+    public PlaceType Type { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }

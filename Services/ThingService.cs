@@ -14,6 +14,7 @@ public class ThingService
     private readonly Table<Thing> _things;
     private readonly Table<ThingData> _thingData;
     private readonly Table<ThingByOwner> _thingsByOwner;
+    private readonly Table<ThingByName> _thingsByName;
     private readonly ILogger<ThingService> _logger;
     private readonly SearchService _searchService;
 
@@ -26,6 +27,7 @@ public class ThingService
         _things = new Table<Thing>(session, GlobalMapping.Instance);
         _thingData = new Table<ThingData>(session, GlobalMapping.Instance);
         _thingsByOwner = new Table<ThingByOwner>(session, GlobalMapping.Instance);
+        _thingsByName = new Table<ThingByName>(session, GlobalMapping.Instance);
     }
 
     /// <summary>
@@ -76,11 +78,22 @@ public class ThingService
                 PRIMARY KEY (user_id, owner_id, thing_id)
             );";
 
+            var createByName = @"CREATE TABLE IF NOT EXISTS thing_by_name (
+                user_id uuid,
+                name text,
+                thing_id uuid,
+                type int,
+                created_at timestamp,
+                updated_at timestamp,
+                PRIMARY KEY ((user_id, name), thing_id)
+            );";
+
             if (_session != null)
             {
                 _session.Execute(new SimpleStatement(createThing.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
                 _session.Execute(new SimpleStatement(createThingData.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
                 _session.Execute(new SimpleStatement(createByOwner.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
+                _session.Execute(new SimpleStatement(createByName.Replace("CREATE TABLE IF NOT EXISTS ", $"CREATE TABLE IF NOT EXISTS {ks}.")));
             }
         }
         catch (Exception ex)
@@ -103,6 +116,7 @@ public class ThingService
         TryEnsureLcs("thing");
         TryEnsureLcs("thing_data");
         TryEnsureLcs("thing_by_owner");
+        TryEnsureLcs("thing_by_name");
     }
 
     private void TryEnsureLcs(string tableName)
@@ -185,6 +199,38 @@ public class ThingService
             await _thingsByOwner.Insert(bo).ExecuteAsync();
         }
 
+        // maintain denormalized table for name lookups
+        if (!string.IsNullOrEmpty(thing.Name))
+        {
+            var bn = new ThingByName
+            {
+                UserId = thing.UserId,
+                Name = thing.Name,
+                ThingId = thing.Id,
+                Type = thing.Type,
+                CreatedAt = thing.CreatedAt,
+                UpdatedAt = thing.UpdatedAt
+            };
+
+            try
+            {
+                await _thingsByName.Insert(bn).ExecuteAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to insert into thing_by_name via table mapping; trying direct CQL");
+                try
+                {
+                    var insertName = "INSERT INTO thing_by_name (user_id, name, thing_id, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);";
+                    _session.Execute(new SimpleStatement(insertName, thing.UserId, thing.Name, thing.Id, (int)thing.Type, thing.CreatedAt, thing.UpdatedAt));
+                }
+                catch (Exception inner)
+                {
+                    _logger.LogWarning(inner, "Direct CQL insert into thing_by_name also failed; continuing");
+                }
+            }
+        }
+
         _logger.LogInformation("Saved thing {ThingId} '{ThingName}' for user {UserId}", 
             thing.Id, thing.Name, thing.UserId);
 
@@ -211,11 +257,6 @@ public class ThingService
         if (thingId.HasValue)
         {
             var rows = await _things.Where(x => x.UserId == userId && x.Id == thingId.Value).ExecuteAsync();
-            t = rows.FirstOrDefault();
-        }
-        else if (!string.IsNullOrEmpty(name))
-        {
-            var rows = await _things.Where(x => x.UserId == userId && x.Name == name).ExecuteAsync();
             t = rows.FirstOrDefault();
         }
 
@@ -256,16 +297,6 @@ public class ThingService
     public async Task<IDictionary<string,string>> GetAttributesByThingId(Guid userId, Guid thingId)
     {
         var rows = await _things.Where(p => p.UserId == userId && p.Id == thingId).ExecuteAsync();
-        var first = rows.FirstOrDefault();
-        return first?.Attributes ?? new Dictionary<string,string>();
-    }
-
-    /// <summary>
-    /// Get attributes for a thing by name
-    /// </summary>
-    public async Task<IDictionary<string,string>> GetAttributesByName(Guid userId, string name)
-    {
-        var rows = await _things.Where(p => p.UserId == userId && p.Name == name).ExecuteAsync();
         var first = rows.FirstOrDefault();
         return first?.Attributes ?? new Dictionary<string,string>();
     }

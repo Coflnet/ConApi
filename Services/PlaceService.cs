@@ -124,11 +124,6 @@ public class PlaceService
             var rows = await _places.Where(x => x.UserId == userId && x.Id == placeId.Value).ExecuteAsync();
             p = rows.FirstOrDefault();
         }
-        else if (!string.IsNullOrEmpty(name))
-        {
-            var rows = await _places.Where(x => x.UserId == userId && x.Name == name).ExecuteAsync();
-            p = rows.FirstOrDefault();
-        }
 
         if (p == null)
         {

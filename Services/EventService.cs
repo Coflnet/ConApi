@@ -211,11 +211,6 @@ public class EventService
             var rows = await _events.Where(x => x.UserId == userId && x.Id == eventId.Value).ExecuteAsync();
             ev = rows.FirstOrDefault();
         }
-        else if (!string.IsNullOrEmpty(title))
-        {
-            var rows = await _events.Where(x => x.UserId == userId && x.Title == title).ExecuteAsync();
-            ev = rows.FirstOrDefault();
-        }
 
         if (ev == null)
         {

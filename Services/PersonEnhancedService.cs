@@ -47,7 +47,7 @@ public class PersonEnhancedService
         await Task.WhenAll(attributesTask, relationshipsTask, eventsTask, thingsTask);
 
         var attributes = await attributesTask;
-        var relationships = await relationshipsTask;
+        var relationships = (await relationshipsTask).ToList(); // Materialize to avoid multiple enumeration
         var events = await eventsTask;
         var things = await thingsTask;
 

@@ -40,23 +40,16 @@ public class PersonController : ControllerBase
     public async Task<IEnumerable<PersonAttributeDto>> GetPersonData(string id)
     {
         var userId = this.GetUserId();
-        var parts = id.Split(";");
-        if (parts.Length == 1)
+        
+        // Only support UUID-based lookups now
+        if (Guid.TryParse(id, out var pid))
         {
-            if (Guid.TryParse(parts[0], out var pid))
-            {
-                var attrs = await _personService.GetAttributesByPersonId(userId, pid);
-                return attrs.Select(kv => new PersonAttributeDto { PersonId = pid, Key = kv.Key, Value = kv.Value, Category = string.Empty });
-            }
-            var attrs2 = await _personService.GetAttributesByName(userId, parts[0]);
-            return attrs2.Select(kv => new PersonAttributeDto { PersonId = Guid.Empty, Key = kv.Key, Value = kv.Value, Category = string.Empty });
+            var attrs = await _personService.GetAttributesByPersonId(userId, pid);
+            return attrs.Select(kv => new PersonAttributeDto { PersonId = pid, Key = kv.Key, Value = kv.Value, Category = string.Empty });
         }
-        else
-        {
-            // legacy composite id handling — treat as name-based query
-            var attrs = await _personService.GetAttributesByName(userId, parts[0]);
-            return attrs.Select(kv => new PersonAttributeDto { PersonId = Guid.Empty, Key = kv.Key, Value = kv.Value, Category = string.Empty });
-        }
+        
+        // Return empty if not a valid UUID
+        return Array.Empty<PersonAttributeDto>();
     }
 
     /// <summary>
@@ -68,30 +61,18 @@ public class PersonController : ControllerBase
     {
         var userId = this.GetUserId();
 
-        IEnumerable<PersonAttributeDto> personData;
-        if (Guid.TryParse(id, out var pid))
+        // Only support UUID-based lookups now
+        if (!Guid.TryParse(id, out var pid))
         {
-            var attrs = await _personService.GetAttributesByPersonId(userId, pid);
-            personData = attrs.Select(kv => new PersonAttributeDto { PersonId = pid, Key = kv.Key, Value = kv.Value, Category = string.Empty });
-        }
-        else
-        {
-            var parts = id.Split(";");
-            var attrs = await _personService.GetAttributesByName(userId, parts[0]);
-            personData = attrs.Select(kv => new PersonAttributeDto { PersonId = Guid.Empty, Key = kv.Key, Value = kv.Value, Category = string.Empty });
+            return BadRequest("Person ID must be a valid UUID");
         }
 
-        // If we have a GUID person id, use GUID calls; otherwise relationships/things/events can't be resolved by GUID
-        IEnumerable<Relationship> relationships = new List<Relationship>();
-        IEnumerable<Thing> things = new List<Thing>();
-        IEnumerable<Event> events = new List<Event>();
+        var attrs = await _personService.GetAttributesByPersonId(userId, pid);
+        var personData = attrs.Select(kv => new PersonAttributeDto { PersonId = pid, Key = kv.Key, Value = kv.Value, Category = string.Empty });
 
-        if (Guid.TryParse(id, out var pid2))
-        {
-            relationships = await _relationshipService.GetRelationshipsForEntity(userId, pid2);
-            things = await _thingService.GetThingsByOwner(userId, pid2);
-            events = await _eventService.GetTimeline(userId, pid2);
-        }
+        var relationships = await _relationshipService.GetRelationshipsForEntity(userId, pid);
+        var things = await _thingService.GetThingsByOwner(userId, pid);
+        var events = await _eventService.GetTimeline(userId, pid);
 
         return Ok(new {
             PersonData = personData,
@@ -117,19 +98,10 @@ public class PersonController : ControllerBase
 
         await _personService.UpsertAttribute(userId, personId, nameToUse, data.Key, data.Value);
 
-        if (string.Equals(data.Key, "name", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(data.Key, "name", StringComparison.OrdinalIgnoreCase) && personId.HasValue)
         {
-            // Build composite id for search: try to obtain birthday/birthplace from attributes if available
-            string date = string.Empty;
-            string birthPlace = string.Empty;
-            if (personId.HasValue)
-            {
-                var attrs = await _personService.GetAttributesByPersonId(userId, personId.Value);
-                if (attrs.TryGetValue("birthday", out var b)) date = b;
-                if (attrs.TryGetValue("birthplace", out var bp)) birthPlace = bp;
-            }
-            var fullId = $"{data.Value};{date};{birthPlace}";
-            await _searchService.AddEntry(userId, data.Value, fullId, SearchEntry.ResultType.Person);
+            // Add to search with UUID only
+            await _searchService.AddEntry(userId, data.Value, personId.Value.ToString(), SearchEntry.ResultType.Person);
         }
     }
 
@@ -195,20 +167,18 @@ public class PersonController : ControllerBase
         {
             try
             {
-                // Create person with name
-                await _personService.UpsertAttribute(userId, null, personData.Name, "name", personData.Name);
+                // Create person with generated UUID
+                var newPersonId = Guid.NewGuid();
+                await _personService.UpsertAttribute(userId, newPersonId, personData.Name, "name", personData.Name);
 
                 // Add all attributes
                 foreach (var attr in personData.Attributes)
                 {
-                    await _personService.UpsertAttribute(userId, null, personData.Name, attr.Key, attr.Value);
+                    await _personService.UpsertAttribute(userId, newPersonId, personData.Name, attr.Key, attr.Value);
                 }
 
-                // Add to search
-                var date = personData.Attributes.GetValueOrDefault("birthday", string.Empty);
-                var birthPlace = personData.Attributes.GetValueOrDefault("birthplace", string.Empty);
-                var fullId = $"{personData.Name};{date};{birthPlace}";
-                await _searchService.AddEntry(userId, personData.Name, fullId, SearchEntry.ResultType.Person);
+                // Add to search with UUID only
+                await _searchService.AddEntry(userId, personData.Name, newPersonId.ToString(), SearchEntry.ResultType.Person);
 
                 result.SuccessCount++;
             }

@@ -72,6 +72,25 @@ public class ThingByOwner
 }
 
 /// <summary>
+/// Denormalized table to support lookups by (user_id, name)
+/// </summary>
+public class ThingByName
+{
+    [PartitionKey(0)]
+    public Guid UserId { get; set; }
+
+    [PartitionKey(1)]
+    public string Name { get; set; } = string.Empty;
+
+    [ClusteringKey(0)]
+    public Guid ThingId { get; set; }
+
+    public ThingType Type { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
 /// Types of things
 /// </summary>
 public enum ThingType

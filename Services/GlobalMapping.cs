@@ -29,8 +29,10 @@ public static class GlobalMapping
 
         // Place
         cfg.Define(new Map<Place>()
-            .PartitionKey(t => t.UserId, t => t.Name)
+            // Partition by user only; id is the clustering key so queries by (user_id, id) are supported
+            .PartitionKey(t => t.UserId)
             .ClusteringKey(t => t.Id)
+            .Column(t => t.Name, c => c.WithName("name"))
             .Column(t => t.Type, c => c.WithName("type").WithDbType<int>())
             .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>()));
 
@@ -40,11 +42,33 @@ public static class GlobalMapping
             .ClusteringKey(t => t.Key));
 
         // Thing
+        // Partition by user only and cluster by id so queries by (user_id, id) are supported
         cfg.Define(new Map<Thing>()
-            .PartitionKey(t => t.UserId, t => t.Name)
+            .PartitionKey(t => t.UserId)
             .ClusteringKey(t => t.Id)
+            .Column(t => t.Name, c => c.WithName("name"))
             .Column(t => t.Type, c => c.WithName("type").WithDbType<int>())
-            .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>()));
+            .Column(t => t.OwnerId, c => c.WithName("owner_id"))
+            .Column(t => t.Manufacturer, c => c.WithName("manufacturer"))
+            .Column(t => t.YearMade, c => c.WithName("year_made"))
+            .Column(t => t.Model, c => c.WithName("model"))
+            .Column(t => t.SerialNumber, c => c.WithName("serial_number"))
+            .Column(t => t.PrivacyLevel, c => c.WithName("privacy_level").WithDbType<int>())
+            .Column(t => t.Attributes, c => c.WithName("attributes"))
+            .Column(t => t.CreatedAt, c => c.WithName("created_at"))
+            .Column(t => t.UpdatedAt, c => c.WithName("updated_at")));
+
+        // Denormalized table to support lookups by (user_id, name)
+        cfg.Define(new Map<ThingByName>()
+            .TableName("thing_by_name")
+            .PartitionKey(t => t.UserId, t => t.Name)
+            .ClusteringKey(t => t.ThingId)
+            .Column(t => t.UserId, c => c.WithName("user_id"))
+            .Column(t => t.Name, c => c.WithName("name"))
+            .Column(t => t.ThingId, c => c.WithName("thing_id"))
+            .Column(t => t.Type, c => c.WithName("type").WithDbType<int>())
+            .Column(t => t.CreatedAt, c => c.WithName("created_at"))
+            .Column(t => t.UpdatedAt, c => c.WithName("updated_at")));
 
         cfg.Define(new Map<ThingData>()
             .PartitionKey(t => t.UserId, t => t.ThingId)
