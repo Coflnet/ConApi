@@ -1,3 +1,19 @@
+# Superseded: historical Angular checkout
+
+This `dev/Connections` checkout is **superseded**. The active Con application uses
+Flutter and lives in [Coflnet/ConUi](https://github.com/Coflnet/ConUi), serving
+[con.coflnet.com](https://con.coflnet.com).
+
+For development, open `/run/media/ekwav/Data/dev/Con/ConUi-work/integration`, use
+branch `integration/stories-map-rollout`, and read its `HANDOFF.md` first.
+Do not use `dev/Con/ConUi`, which is the owner's checkout with local work.
+
+The code and documentation below are historical reference. Existing local changes
+are preserved; these old build and deployment instructions do not describe the
+current application. See [AGENTS.md](AGENTS.md) for the checkout guardrail.
+
+---
+
 # Connections API - Implementation Summary
 
 ## 🎯 Overview
